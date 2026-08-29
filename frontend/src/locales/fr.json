@@ -1470,6 +1470,7 @@
     "success": "Succès",
     "searchIcon": "Rechercher une icône...",
     "noIconsFound": "Aucune icône trouvée",
+    "noEmojisFound": "Aucun emoji trouvé",
     "primaryCurrency": "Devise principale",
     "showLess": "Afficher moins",
     "showMore": "+{{count}} de plus",

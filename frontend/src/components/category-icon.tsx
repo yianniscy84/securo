@@ -3,11 +3,11 @@ import { CircleHelp } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const SIZES = {
-  xs: { box: 'w-4 h-4 rounded', icon: 10 },
-  sm: { box: 'w-6 h-6 rounded-md', icon: 14 },
-  md: { box: 'w-8 h-8 rounded-lg', icon: 16 },
-  lg: { box: 'w-10 h-10 rounded-xl', icon: 20 },
-  xl: { box: 'w-11 h-11 rounded-xl', icon: 22 },
+  xs: { box: 'w-4 h-4 rounded', icon: 10, emoji: 10 },
+  sm: { box: 'w-6 h-6 rounded-md', icon: 14, emoji: 13 },
+  md: { box: 'w-8 h-8 rounded-lg', icon: 16, emoji: 16 },
+  lg: { box: 'w-10 h-10 rounded-xl', icon: 20, emoji: 20 },
+  xl: { box: 'w-11 h-11 rounded-xl', icon: 22, emoji: 22 },
 } as const
 
 interface CategoryIconProps {
@@ -18,18 +18,18 @@ interface CategoryIconProps {
 }
 
 export function CategoryIcon({ icon, color, size = 'md', className }: CategoryIconProps) {
-  const { box, icon: iconSize } = SIZES[size]
+  const { box, icon: iconSize, emoji: emojiSize } = SIZES[size]
   const bgColor = color || '#6B7280'
   const iconStr = icon || 'circle-help'
 
-  // Emoji fallback for backward compatibility
+  // Emoji rendering when icon is an emoji glyph
   if (isEmoji(iconStr)) {
     return (
       <div
-        className={cn(box, 'flex items-center justify-center shrink-0', className)}
+        className={cn(box, 'flex items-center justify-center shrink-0 select-none overflow-hidden', className)}
         style={{ backgroundColor: bgColor }}
       >
-        <span style={{ fontSize: iconSize - 2, lineHeight: 1 }}>{iconStr}</span>
+        <span style={{ fontSize: emojiSize, lineHeight: 1 }}>{iconStr}</span>
       </div>
     )
   }
@@ -45,3 +45,4 @@ export function CategoryIcon({ icon, color, size = 'md', className }: CategoryIc
     </div>
   )
 }
+

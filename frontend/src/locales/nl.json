@@ -1470,6 +1470,7 @@
     "success": "Succes",
     "searchIcon": "Zoekpictogram...",
     "noIconsFound": "Geen iconen gevonden",
+    "noEmojisFound": "Geen emoji's gevonden",
     "primaryCurrency": "Primaire valuta",
     "showLess": "Laat minder zien",
     "showMore": "+{{count}} meer",

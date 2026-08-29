@@ -1556,6 +1556,7 @@
     "success": "Sukces",
     "searchIcon": "Szukaj ikony...",
     "noIconsFound": "Nie znaleziono ikon",
+    "noEmojisFound": "Nie znaleziono emoji",
     "primaryCurrency": "Waluta główna",
     "showLess": "Pokaż mniej",
     "showMore_one": "+{{count}} więcej",

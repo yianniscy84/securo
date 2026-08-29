@@ -1469,6 +1469,7 @@
     "success": "Success",
     "searchIcon": "Search icon...",
     "noIconsFound": "No icons found",
+    "noEmojisFound": "No emojis found",
     "primaryCurrency": "Primary Currency",
     "showLess": "Show less",
     "showMore": "+{{count}} more",

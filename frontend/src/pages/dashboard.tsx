@@ -39,7 +39,6 @@ import {
 } from 'recharts'
 import { CheckCircle2, CalendarIcon, Clock, Paperclip, Target, ArrowUpDown, HelpCircle, EyeClosed } from 'lucide-react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { ICON_MAP } from '@/lib/category-icons'
 import { PageHeader } from '@/components/page-header'
 import { CategoryIcon } from '@/components/category-icon'
 import { AccountIcon } from '@/components/account-icon'
@@ -1076,15 +1075,13 @@ export default function DashboardPage() {
                 achieved: { cls: 'text-emerald-600', key: 'goals.onTrackAchieved' },
               }
               const otc = goal.on_track ? onTrackConfig[goal.on_track] : null
-              const GoalIcon = (goal.icon && ICON_MAP[goal.icon]) || Target
               return (
                 <div key={goal.id} className="px-5 py-3 flex items-center gap-4">
-                  <div
-                    className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-white"
-                    style={{ backgroundColor: goal.color ?? '#6B7280' }}
-                  >
-                    <GoalIcon size={14} />
-                  </div>
+                  <CategoryIcon
+                    icon={goal.icon || 'target'}
+                    color={goal.color}
+                    size="md"
+                  />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2 mb-1">
                       <span className="text-sm font-medium text-foreground truncate">{goal.name}</span>

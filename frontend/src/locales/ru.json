@@ -1478,6 +1478,7 @@
     "success": "Успешно",
     "searchIcon": "Поиск иконки...",
     "noIconsFound": "Иконки не найдены",
+    "noEmojisFound": "Эмодзи не найдены",
     "primaryCurrency": "Основная валюта",
     "showLess": "Показать меньше",
     "showMore": "+{{count}} ещё",
