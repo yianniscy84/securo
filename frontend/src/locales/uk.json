@@ -969,10 +969,6 @@
     "stopProcessingAction": "Зупинити виконання наступних правил",
     "stopProcessingHint": "(наступні правила не виконуватимуться для цієї транзакції)",
     "stopProcessingBadge": "Зупиняє наступні правила",
-    "rulesCount_one": "{{count}} правило",
-    "rulesCount_few": "{{count}} правила",
-    "rulesCount_many": "{{count}} правил",
-    "rulesCount_other": "{{count}} правил",
     "importReadyCount_one": "{{count}} правило готове до імпорту",
     "importReadyCount_few": "{{count}} правила готові до імпорту",
     "importReadyCount_many": "{{count}} правил готові до імпорту",
@@ -990,7 +986,14 @@
     "categoriesToCreate_one": "Буде створено {{count}} категорію",
     "categoriesToCreate_few": "Буде створено {{count}} категорії",
     "categoriesToCreate_many": "Буде створено {{count}} категорій",
-    "categoriesToCreate_other": "Буде створено {{count}} категорій"
+    "categoriesToCreate_other": "Буде створено {{count}} категорій",
+    "sortLabel": "Сортування",
+    "sortByExecution": "Порядок виконання",
+    "sortByNameAsc": "Назва (А — Я)",
+    "sortByNameDesc": "Назва (Я — А)",
+    "sortByCategoryAsc": "Категорія (А — Я)",
+    "sortByCategoryDesc": "Категорія (Я — А)",
+    "filteredCount": "{{filtered}} / {{total}} правил"
   },
   "categories": {
     "title": "Категорії",

@@ -961,8 +961,6 @@
     "stopProcessingAction": "Weitere Regelausführung stoppen",
     "stopProcessingHint": "(für diese Transaktion werden keine nachfolgenden Regeln ausgeführt)",
     "stopProcessingBadge": "Stoppt weitere Regeln",
-    "rulesCount": "{{count}} Regeln",
-    "rulesCount_one": "{{count}} Regel",
     "importReadyCount": "{{count}} Regeln bereit zum Importieren",
     "importReadyCount_one": "{{count}} Regel bereit zum Importieren",
     "importSkippedCount": "{{count}} Regeln werden übersprungen",
@@ -974,7 +972,14 @@
     "createMissingCategoriesLabel": "Fehlende Kategorien erstellen",
     "createMissingCategoriesHint": "Für importierte Regeln benötigte Kategorien werden automatisch erstellt",
     "categoriesToCreate": "{{count}} Kategorien werden erstellt",
-    "categoriesToCreate_one": "{{count}} Kategorie wird erstellt"
+    "categoriesToCreate_one": "{{count}} Kategorie wird erstellt",
+    "sortLabel": "Sortieren nach",
+    "sortByExecution": "Ausführungsreihenfolge",
+    "sortByNameAsc": "Name (A bis Z)",
+    "sortByNameDesc": "Name (Z bis A)",
+    "sortByCategoryAsc": "Kategorie (A bis Z)",
+    "sortByCategoryDesc": "Kategorie (Z bis A)",
+    "filteredCount": "{{filtered}} / {{total}} Regeln"
   },
   "categories": {
     "title": "Kategorien",

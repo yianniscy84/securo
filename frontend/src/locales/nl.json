@@ -961,8 +961,6 @@
     "stopProcessingAction": "Verdere regelverwerking stoppen",
     "stopProcessingHint": "(geen volgende regels worden uitgevoerd voor deze transactie)",
     "stopProcessingBadge": "Stopt volgende regels",
-    "rulesCount": "{{count}} regels",
-    "rulesCount_one": "{{count}} regel",
     "importReadyCount": "{{count}} regels klaar om te importeren",
     "importReadyCount_one": "{{count}} regel klaar om te importeren",
     "importSkippedCount": "{{count}} regels worden overgeslagen",
@@ -974,7 +972,14 @@
     "createMissingCategoriesLabel": "Ontbrekende categorieën aanmaken",
     "createMissingCategoriesHint": "Categorieën die nodig zijn voor geïmporteerde regels worden automatisch aangemaakt",
     "categoriesToCreate": "{{count}} categorieën worden aangemaakt",
-    "categoriesToCreate_one": "{{count}} categorie wordt aangemaakt"
+    "categoriesToCreate_one": "{{count}} categorie wordt aangemaakt",
+    "sortLabel": "Sorteren op",
+    "sortByExecution": "Uitvoeringsvolgorde",
+    "sortByNameAsc": "Naam (A tot Z)",
+    "sortByNameDesc": "Naam (Z tot A)",
+    "sortByCategoryAsc": "Categorie (A tot Z)",
+    "sortByCategoryDesc": "Categorie (Z tot A)",
+    "filteredCount": "{{filtered}} / {{total}} regels"
   },
   "categories": {
     "title": "Categorieën",

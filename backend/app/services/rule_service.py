@@ -1138,13 +1138,12 @@ async def create_rule(
     await _validate_rule_definition(session, workspace_id, data.conditions, data.actions)
 
     priority = data.priority
-    if priority == 0:
+    if priority is None:
         max_priority_res = await session.execute(
             select(func.max(Rule.priority)).where(Rule.workspace_id == workspace_id)
         )
         max_p = max_priority_res.scalar_one_or_none()
-        if max_p is not None:
-            priority = max_p + 10
+        priority = (max_p + 10) if max_p is not None else 0
 
     rule = Rule(
         user_id=user_id,

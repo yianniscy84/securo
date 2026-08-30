@@ -103,6 +103,45 @@ async def test_get_rule_by_id(session: AsyncSession, test_user, test_workspace, 
 
 
 @pytest.mark.asyncio
+async def test_create_rule_explicit_zero_priority_preserved(
+    session: AsyncSession, test_user, test_workspace, test_categories
+):
+    # Create a rule with high priority first
+    await create_rule(
+        session,
+        test_workspace.id,
+        test_user.id,
+        RuleCreate(
+            name="High Priority Rule",
+            conditions=[RuleCondition(field="description", op="contains", value="HIGH")],
+            actions=[RuleAction(op="set_category", value=str(test_categories[0].id))],
+            priority=99,
+        ),
+    )
+
+    # Create a rule with explicit priority=0
+    rule_zero = await create_rule(
+        session,
+        test_workspace.id,
+        test_user.id,
+        RuleCreate(
+            name="Zero Priority Rule",
+            conditions=[RuleCondition(field="description", op="contains", value="ZERO")],
+            actions=[RuleAction(op="set_category", value=str(test_categories[0].id))],
+            priority=0,
+        ),
+    )
+
+    assert rule_zero.priority == 0
+
+    all_rules = await get_rules(session, test_workspace.id)
+    assert all_rules[0].name == "Zero Priority Rule"
+    assert all_rules[0].priority == 0
+    assert all_rules[1].name == "High Priority Rule"
+    assert all_rules[1].priority == 99
+
+
+@pytest.mark.asyncio
 async def test_get_rule_not_found(session: AsyncSession, test_user, test_workspace):
     result = await get_rule(session, uuid.uuid4(), test_workspace.id)
     assert result is None

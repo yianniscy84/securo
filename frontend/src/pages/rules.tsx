@@ -12,7 +12,6 @@ import { extractApiError } from '@/lib/api-errors'
 import { invalidateFinancialQueries } from '@/lib/invalidate-queries'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { DeleteConfirmationDialog } from '@/components/delete-confirmation-dialog'
 import { Label } from '@/components/ui/label'
 import {
@@ -44,8 +43,8 @@ import {
   GripVertical,
   Copy,
   ShieldAlert,
-  SlidersHorizontal,
   AlertTriangle,
+  ArrowUpDown,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PageHeader } from '@/components/page-header'
@@ -53,23 +52,15 @@ import { useWorkspace } from '@/contexts/workspace-context'
 import { RuleDialog } from '@/components/rule-dialog'
 import { CategorySelect } from '@/components/category-select'
 import { findCategoryReference } from '@/lib/category-reference-utils'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
-function SectionCard({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
-      {children}
-    </div>
-  )
-}
 
-function SectionHeader({ title, action }: { title: string; action?: React.ReactNode }) {
-  return (
-    <div className="px-4 sm:px-5 py-4 border-b border-border flex flex-wrap items-center justify-between gap-2">
-      <p className="text-sm font-semibold text-foreground">{title}</p>
-      {action}
-    </div>
-  )
-}
 
 const CONDITION_FIELDS = [
   { value: 'description', label: 'rules.fieldDescription' },
@@ -195,10 +186,11 @@ export default function RulesPage() {
   const [deletingRule, setDeletingRule] = useState<Rule | null>(null)
   const [dialogInstance, setDialogInstance] = useState(0)
 
-  // Search & Filter State
+  // Search, Filter & Sort State
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [categoryFilter, setCategoryFilter] = useState<string>('all')
+  const [sortBy, setSortBy] = useState<'execution' | 'name_asc' | 'name_desc' | 'category_asc' | 'category_desc'>('execution')
 
   // Drag & drop state
   const [draggedRuleId, setDraggedRuleId] = useState<string | null>(null)
@@ -267,18 +259,6 @@ export default function RulesPage() {
     return map
   }, [fullOrderedRules])
 
-  // Distinct categories that have rules targeting them
-  const targetedCategories = useMemo(() => {
-    const ids = new Set<string>()
-    for (const rule of rulesList ?? []) {
-      for (const a of rule.actions) {
-        if (a.op === 'set_category' && a.value) {
-          ids.add(String(a.value))
-        }
-      }
-    }
-    return displayCategories.filter(c => ids.has(String(c.id)))
-  }, [rulesList, displayCategories])
 
   // Filtered rules based on search query, status, and category
   const filteredRules = useMemo(() => {
@@ -292,7 +272,7 @@ export default function RulesPage() {
 
     if (categoryFilter !== 'all') {
       result = result.filter(r => {
-        return r.actions.some(a => a.op === 'set_category' && String(a.value) === categoryFilter)
+        return r.actions.some(a => a.op === 'set_category' && (String(a.value) === categoryFilter || findCategoryReference(displayCategories, a.value)?.id === categoryFilter))
       })
     }
 
@@ -325,8 +305,40 @@ export default function RulesPage() {
       })
     }
 
+    if (sortBy === 'name_asc') {
+      result.sort((a, b) => a.name.localeCompare(b.name))
+    } else if (sortBy === 'name_desc') {
+      result.sort((a, b) => b.name.localeCompare(a.name))
+    } else if (sortBy === 'category_asc') {
+      result.sort((a, b) => {
+        const aCat = a.actions?.find(act => act.op === 'set_category')
+          ? (findCategoryReference(categories, a.actions.find(act => act.op === 'set_category')!.value)?.name ?? '')
+          : ''
+        const bCat = b.actions?.find(act => act.op === 'set_category')
+          ? (findCategoryReference(categories, b.actions.find(act => act.op === 'set_category')!.value)?.name ?? '')
+          : ''
+        if (!aCat && bCat) return 1
+        if (aCat && !bCat) return -1
+        const cmp = aCat.localeCompare(bCat)
+        return cmp !== 0 ? cmp : a.name.localeCompare(b.name)
+      })
+    } else if (sortBy === 'category_desc') {
+      result.sort((a, b) => {
+        const aCat = a.actions?.find(act => act.op === 'set_category')
+          ? (findCategoryReference(categories, a.actions.find(act => act.op === 'set_category')!.value)?.name ?? '')
+          : ''
+        const bCat = b.actions?.find(act => act.op === 'set_category')
+          ? (findCategoryReference(categories, b.actions.find(act => act.op === 'set_category')!.value)?.name ?? '')
+          : ''
+        if (!aCat && bCat) return 1
+        if (aCat && !bCat) return -1
+        const cmp = bCat.localeCompare(aCat)
+        return cmp !== 0 ? cmp : a.name.localeCompare(b.name)
+      })
+    }
+
     return result
-  }, [fullOrderedRules, statusFilter, categoryFilter, searchQuery, displayCategories, payees])
+  }, [fullOrderedRules, statusFilter, categoryFilter, searchQuery, sortBy, displayCategories, categories, payees])
 
   // Counts
   const counts = useMemo(() => {
@@ -337,6 +349,7 @@ export default function RulesPage() {
   }, [fullOrderedRules])
 
   const isFilteringActive = searchQuery.trim() !== '' || statusFilter !== 'all' || categoryFilter !== 'all'
+  const canReorder = canWrite && !isFilteringActive && sortBy === 'execution'
 
   // Mutations
   const createMutation = useMutation({
@@ -623,135 +636,118 @@ export default function RulesPage() {
     setSearchQuery('')
     setStatusFilter('all')
     setCategoryFilter('all')
+    setSortBy('execution')
   }
 
   return (
-    <div className="space-y-6">
-      <PageHeader section={t('rules.section')} title={t('nav.rules')} />
-
-      <SectionCard>
-        {/* Top Header Toolbar */}
-        <SectionHeader
-          title={t('rules.sectionTitle')}
-          action={
-            canWrite ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <input
-                  ref={importInputRef}
-                  type="file"
-                  accept="application/json,.json"
-                  className="hidden"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0]
-                    if (file) void handleImportFile(file)
-                  }}
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5 h-8 text-xs"
-                  onClick={() => exportMutation.mutate()}
-                  disabled={exportMutation.isPending}
-                >
-                  <Download size={13} />
-                  <span className="hidden sm:inline">{t('rules.export')}</span>
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5 h-8 text-xs"
-                  onClick={() => importInputRef.current?.click()}
-                  disabled={importMutation.isPending}
-                >
-                  <Upload size={13} />
-                  <span className="hidden sm:inline">{t('rules.import')}</span>
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5 h-8 text-xs"
-                  onClick={() => setPacksDialogOpen(true)}
-                >
-                  <Package size={13} />
-                  <span className="hidden sm:inline">{t('rules.packs')}</span>
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5 h-8 text-xs"
-                  onClick={() => {
-                    if (window.confirm(t('rules.confirmResetAndReapplyAll', 'Reset matching transaction categories, notes, and rule-managed descriptions, then reapply all active rules?'))) {
-                      applyAllMutation.mutate()
-                    }
-                  }}
-                  disabled={applyAllMutation.isPending}
-                >
-                  <RefreshCw size={13} />
-                  <span className="hidden sm:inline">{t('rules.resetAndReapplyAll', 'Reset and reapply')}</span>
-                </Button>
-                <Button size="sm" className="gap-1.5 h-8 text-xs" onClick={openCreate}>
-                  <Plus size={14} /> <span>{t('rules.add')}</span>
-                </Button>
-              </div>
-            ) : undefined
-          }
-        />
-
-        {/* Search & Filter Bar */}
-        <div className="p-4 bg-muted/30 border-b border-border space-y-3">
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-            {/* Search Input */}
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={15} />
-              <Input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={t('rules.searchPlaceholder', 'Search rules by name, conditions, or actions...')}
-                className="pl-9 pr-8 h-9 text-sm bg-background border-border"
+    <div>
+      {/* Top Page Header with Action Buttons */}
+      <PageHeader
+        section={t('rules.section')}
+        title={t('nav.rules')}
+        action={
+          canWrite ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                ref={importInputRef}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0]
+                  if (file) void handleImportFile(file)
+                }}
               />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5 rounded"
-                >
-                  <X size={14} />
-                </button>
-              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 h-8 text-xs"
+                onClick={() => exportMutation.mutate()}
+                disabled={exportMutation.isPending}
+              >
+                <Download size={13} />
+                <span className="hidden sm:inline">{t('rules.export')}</span>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 h-8 text-xs"
+                onClick={() => importInputRef.current?.click()}
+                disabled={importMutation.isPending}
+              >
+                <Upload size={13} />
+                <span className="hidden sm:inline">{t('rules.import')}</span>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 h-8 text-xs"
+                onClick={() => setPacksDialogOpen(true)}
+              >
+                <Package size={13} />
+                <span className="hidden sm:inline">{t('rules.packs')}</span>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 h-8 text-xs"
+                onClick={() => {
+                  if (window.confirm(t('rules.confirmResetAndReapplyAll', 'Reset matching transaction categories, notes, and rule-managed descriptions, then reapply all active rules?'))) {
+                    applyAllMutation.mutate()
+                  }
+                }}
+                disabled={applyAllMutation.isPending}
+              >
+                <RefreshCw size={13} />
+                <span className="hidden sm:inline">{t('rules.resetAndReapplyAll', 'Reset and reapply')}</span>
+              </Button>
+              <Button size="sm" className="gap-1.5 h-8 text-xs" onClick={openCreate}>
+                <Plus size={14} /> <span>{t('rules.add')}</span>
+              </Button>
             </div>
+          ) : undefined
+        }
+      />
 
-            {/* Category Filter */}
-            {targetedCategories.length > 0 && (
-              <div className="sm:w-56 shrink-0">
-                <CategorySelect
-                  value={categoryFilter === 'all' ? '' : categoryFilter}
-                  onChange={(val) => setCategoryFilter(val ? val : 'all')}
-                  categories={targetedCategories}
-                  groups={categoryGroupsList ?? []}
-                  placeholder={t('rules.allCategories', 'All Categories')}
-                  allowNone={true}
-                  className="w-full h-9 bg-background border-border text-xs"
-                />
-              </div>
+      {/* Standalone Filters Bar */}
+      <div className="bg-card rounded-xl border border-border overflow-hidden mb-4 shadow-2xs">
+        <div className="flex flex-wrap items-center justify-between gap-2.5 p-2 sm:p-2.5">
+          {/* Search Input */}
+          <div className="relative flex-1 min-w-[200px] flex items-center">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/70 pointer-events-none" size={15} />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={t('rules.searchPlaceholder', 'Search rules by name, conditions, or actions...')}
+              className="h-8 w-full bg-transparent pl-8 pr-7 text-xs text-foreground placeholder:text-muted-foreground/60 outline-none border-0"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5 rounded"
+              >
+                <X size={13} />
+              </button>
             )}
           </div>
 
-          {/* Status Filter Tabs & Summary */}
-          <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-            <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            {/* Status Tabs */}
+            <div className="flex items-center gap-0.5 p-0.5 bg-muted/40 border border-border/60 rounded-lg">
               <button
                 type="button"
                 onClick={() => setStatusFilter('all')}
                 className={cn(
-                  'px-3 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1.5',
+                  'px-2.5 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1.5',
                   statusFilter === 'all'
-                    ? 'bg-background border border-border text-foreground shadow-sm font-semibold'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-background/50',
+                    ? 'bg-background border border-border text-foreground shadow-2xs font-semibold'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-background/40',
                 )}
               >
                 <span>{t('rules.filterAll', 'All')}</span>
-                <span className="text-[10px] px-1.5 py-0.2 bg-muted text-muted-foreground rounded-full">
+                <span className="text-[10px] px-1.5 py-0.2 bg-muted text-muted-foreground rounded-full font-medium">
                   {counts.total}
                 </span>
               </button>
@@ -760,13 +756,13 @@ export default function RulesPage() {
                 type="button"
                 onClick={() => setStatusFilter('active')}
                 className={cn(
-                  'px-3 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1.5',
+                  'px-2.5 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1.5',
                   statusFilter === 'active'
-                    ? 'bg-background border border-border text-foreground shadow-sm font-semibold'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-background/50',
+                    ? 'bg-background border border-border text-foreground shadow-2xs font-semibold'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-background/40',
                 )}
               >
-                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                 <span>{t('rules.filterActive', 'Active')}</span>
                 <span className="text-[10px] px-1.5 py-0.2 bg-emerald-500/10 text-emerald-600 rounded-full font-semibold">
                   {counts.active}
@@ -777,233 +773,267 @@ export default function RulesPage() {
                 type="button"
                 onClick={() => setStatusFilter('inactive')}
                 className={cn(
-                  'px-3 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1.5',
+                  'px-2.5 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1.5',
                   statusFilter === 'inactive'
-                    ? 'bg-background border border-border text-foreground shadow-sm font-semibold'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-background/50',
+                    ? 'bg-background border border-border text-foreground shadow-2xs font-semibold'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-background/40',
                 )}
               >
-                <span className="w-2 h-2 rounded-full bg-muted-foreground/50" />
+                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50" />
                 <span>{t('rules.filterInactive', 'Inactive')}</span>
-                <span className="text-[10px] px-1.5 py-0.2 bg-muted text-muted-foreground rounded-full">
+                <span className="text-[10px] px-1.5 py-0.2 bg-muted text-muted-foreground rounded-full font-medium">
                   {counts.inactive}
                 </span>
               </button>
             </div>
 
-            {/* Clear filters or Count label */}
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              {isFilteringActive ? (
-                <>
-                  <span>
-                    {filteredRules.length} / {counts.total} {t('rules.rulesCount', { count: filteredRules.length })}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={clearAllFilters}
-                    className="h-6 px-2 text-xs text-primary hover:text-primary/80 gap-1"
-                  >
-                    <X size={12} />
-                    {t('rules.clearFilters', 'Clear filters')}
-                  </Button>
-                </>
-              ) : (
-                <span className="flex items-center gap-1.5">
-                  <SlidersHorizontal size={12} className="text-muted-foreground" />
-                  <span>{t('rules.executionOrder', 'Execution Order')} (Top to Bottom)</span>
-                </span>
-              )}
-            </div>
+            {/* Category Filter */}
+            {displayCategories.length > 0 && (
+              <div className="w-48 shrink-0">
+                <CategorySelect
+                  value={categoryFilter === 'all' ? '' : categoryFilter}
+                  onChange={(val) => setCategoryFilter(val ? val : 'all')}
+                  categories={displayCategories}
+                  groups={categoryGroupsList ?? []}
+                  placeholder={t('rules.allCategories', 'All Categories')}
+                  allowNone={false}
+                  className="h-8 text-xs bg-background/50 border-border/80"
+                />
+              </div>
+            )}
+
+            {/* Sort dropdown */}
+            <Select
+              value={sortBy}
+              onValueChange={(val) => setSortBy(val as 'execution' | 'name_asc' | 'name_desc' | 'category_asc' | 'category_desc')}
+            >
+              <SelectTrigger className="h-8 text-xs bg-background/50 border-border/80 min-w-[145px] gap-2 px-3 shadow-2xs hover:bg-muted/40 transition-colors">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <ArrowUpDown size={12} className="text-muted-foreground shrink-0" />
+                  <SelectValue />
+                </div>
+              </SelectTrigger>
+              <SelectContent align="end" className="text-xs">
+                <SelectItem value="execution" className="text-xs">{t('rules.sortByExecution', 'Execution Order')}</SelectItem>
+                <SelectItem value="name_asc" className="text-xs">{t('rules.sortByNameAsc', 'Name (A to Z)')}</SelectItem>
+                <SelectItem value="name_desc" className="text-xs">{t('rules.sortByNameDesc', 'Name (Z to A)')}</SelectItem>
+                <SelectItem value="category_asc" className="text-xs">{t('rules.sortByCategoryAsc', 'Category (A to Z)')}</SelectItem>
+                <SelectItem value="category_desc" className="text-xs">{t('rules.sortByCategoryDesc', 'Category (Z to A)')}</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {/* Clear filters text button */}
+            {isFilteringActive && (
+              <button
+                type="button"
+                onClick={clearAllFilters}
+                className="text-xs text-muted-foreground hover:text-foreground font-medium px-1.5 py-1 transition-colors"
+              >
+                {t('rules.clearFilters', 'Clear filters')}
+              </button>
+            )}
           </div>
         </div>
+      </div>
 
-        {/* Rules List */}
+      {/* Rules List Container */}
+      <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden mb-4">
         {fullOrderedRules.length > 0 ? (
           filteredRules.length > 0 ? (
-            <div className="divide-y divide-border">
-              {filteredRules.map((rule, index) => {
-                const executionOrder = executionOrderMap.get(rule.id) ?? index + 1
-                const hasStopProcessing = rule.actions?.some(a => a.op === 'stop_processing')
-                const isDragging = draggedRuleId === rule.id
-                const isOverTop = dragOverTarget?.id === rule.id && dragOverTarget.pos === 'before'
-                const isOverBottom = dragOverTarget?.id === rule.id && dragOverTarget.pos === 'after'
+            <div>
+              <div className="divide-y divide-border">
+                {filteredRules.map((rule, index) => {
+                  const executionOrder = executionOrderMap.get(rule.id) ?? index + 1
+                  const hasStopProcessing = rule.actions?.some(a => a.op === 'stop_processing')
+                  const isDragging = draggedRuleId === rule.id
+                  const isOverTop = dragOverTarget?.id === rule.id && dragOverTarget.pos === 'before'
+                  const isOverBottom = dragOverTarget?.id === rule.id && dragOverTarget.pos === 'after'
 
-                return (
-                  <div
-                    key={rule.id}
-                    onDragOver={(e) => {
-                      if (!canWrite || isFilteringActive || !draggedRuleId || draggedRuleId === rule.id) return
-                      e.preventDefault()
-                      e.dataTransfer.dropEffect = 'move'
-                      const rect = e.currentTarget.getBoundingClientRect()
-                      const pos = e.clientY - rect.top < rect.height / 2 ? 'before' : 'after'
-                      if (!dragOverTarget || dragOverTarget.id !== rule.id || dragOverTarget.pos !== pos) {
-                        setDragOverTarget({ id: rule.id, pos })
-                      }
-                    }}
-                    onDragLeave={(e) => {
-                      if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                        if (dragOverTarget?.id === rule.id) setDragOverTarget(null)
-                      }
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault()
-                      if (draggedRuleId && dragOverTarget && draggedRuleId !== rule.id) {
-                        handleDrop(draggedRuleId, dragOverTarget.id, dragOverTarget.pos)
-                      }
-                      setDraggedRuleId(null)
-                      setDragOverTarget(null)
-                    }}
-                    className={cn(
-                      'relative px-4 sm:px-5 py-3.5 hover:bg-muted/40 transition-colors group',
-                      canWrite && 'cursor-pointer',
-                      !rule.is_active && 'opacity-65 bg-muted/10',
-                      isDragging && 'opacity-30 bg-muted/70 scale-[0.99]',
-                    )}
-                    onClick={() => {
-                      if (canWrite) openEdit(rule)
-                    }}
-                  >
-                    {/* Glowing insertion line */}
-                    {isOverTop && (
-                      <div className="absolute -top-[1.5px] left-2 right-2 h-[3px] bg-primary rounded-full shadow-[0_0_8px_rgba(var(--primary),0.8)] z-30 pointer-events-none" />
-                    )}
-                    {isOverBottom && (
-                      <div className="absolute -bottom-[1.5px] left-2 right-2 h-[3px] bg-primary rounded-full shadow-[0_0_8px_rgba(var(--primary),0.8)] z-30 pointer-events-none" />
-                    )}
-
-                    <div className="flex items-start gap-3 sm:gap-4">
-                      {/* Drag Handle & Sequence Badge */}
-                      <div className="flex items-center gap-2 shrink-0 pt-0.5" onClick={(e) => e.stopPropagation()}>
-                        {canWrite && !isFilteringActive ? (
-                          <div
-                            draggable
-                            onDragStart={(e) => {
-                              e.dataTransfer.effectAllowed = 'move'
-                              e.dataTransfer.setData('text/plain', rule.id)
-                              setDraggedRuleId(rule.id)
-                            }}
-                            onDragEnd={() => {
-                              setDraggedRuleId(null)
-                              setDragOverTarget(null)
-                            }}
-                            className="cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-foreground p-0.5 rounded transition-colors"
-                            title="Drag to reorder rule execution"
-                          >
-                            <GripVertical size={16} />
-                          </div>
-                        ) : null}
-                        <span
-                          className={cn(
-                            'text-xs font-bold px-2 py-0.5 rounded-md min-w-8 text-center tabular-nums border shadow-2xs',
-                            rule.is_active
-                              ? 'bg-primary/10 text-primary border-primary/20'
-                              : 'bg-muted text-muted-foreground border-border',
-                          )}
-                          title={`Execution priority #${executionOrder}`}
-                        >
-                          #{executionOrder}
-                        </span>
-                      </div>
-
-                      {/* Rule Details */}
-                      <div className="flex-1 min-w-0">
-                        {/* Title Row */}
-                        <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                          <p className="text-sm font-semibold text-foreground truncate">{rule.name}</p>
-                          
-                          {!rule.is_active ? (
-                            <span className="text-[10px] font-semibold bg-muted text-muted-foreground border border-border px-1.5 py-0.2 rounded-full">
-                              {t('rules.inactive', 'inactive')}
-                            </span>
-                          ) : (
-                            <span className="text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 px-1.5 py-0.2 rounded-full">
-                              {t('rules.filterActive', 'active')}
-                            </span>
-                          )}
-
-                          {hasStopProcessing && (
-                            <span className="text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 px-1.5 py-0.2 rounded-full flex items-center gap-1">
-                              <ShieldAlert size={11} />
-                              {t('rules.stopProcessingBadge', 'Stops further rules')}
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Conditions and Actions */}
-                        <div className="space-y-1 text-xs">
-                          {/* IF Conditions */}
-                          <div className="flex items-baseline gap-2">
-                            <span className="font-mono font-bold text-[10px] tracking-wider uppercase text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0">
-                              IF
-                            </span>
-                            <span className="text-muted-foreground font-mono truncate">
-                              {conditionSummary(rule.conditions, rule.conditions_op, t, payees)}
-                            </span>
-                          </div>
-
-                          {/* THEN Actions */}
-                          <div className="flex items-baseline gap-2">
-                            <span className="font-mono font-bold text-[10px] tracking-wider uppercase text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded shrink-0">
-                              THEN
-                            </span>
-                            <span className="text-emerald-600 dark:text-emerald-400 font-medium truncate">
-                              {actionSummary(rule.actions, displayCategories, payees, t)}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Right Action Controls */}
-                      {canWrite && (
-                        <div
-                          className="flex items-center gap-1 shrink-0 pt-0.5"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {/* Quick Active Toggle */}
-                          <button
-                            type="button"
-                            onClick={(e) => handleToggleActive(rule, e)}
-                            className={cn(
-                              'p-1.5 rounded-lg text-xs font-medium transition-colors border shadow-2xs mr-1',
-                              rule.is_active
-                                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 hover:bg-emerald-500/20'
-                                : 'bg-muted border-border text-muted-foreground hover:text-foreground',
-                            )}
-                            title={rule.is_active ? 'Click to disable rule' : 'Click to enable rule'}
-                          >
-                            <span className="flex items-center gap-1">
-                              <span className={cn('w-2 h-2 rounded-full', rule.is_active ? 'bg-emerald-500' : 'bg-muted-foreground/40')} />
-                            </span>
-                          </button>
-
-                          {/* Duplicate Button */}
-                          <button
-                            type="button"
-                            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                            onClick={() => handleDuplicate(rule)}
-                            title={t('rules.duplicate', 'Duplicate rule')}
-                          >
-                            <Copy size={14} />
-                          </button>
-
-                          {/* Delete Button */}
-                          <button
-                            type="button"
-                            className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10 transition-colors"
-                            onClick={() => setDeletingRule(rule)}
-                            disabled={deleteMutation.isPending}
-                            title={t('common.delete')}
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
+                  return (
+                    <div
+                      key={rule.id}
+                      onDragOver={(e) => {
+                        if (!canReorder || !draggedRuleId || draggedRuleId === rule.id) return
+                        e.preventDefault()
+                        e.dataTransfer.dropEffect = 'move'
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        const pos = e.clientY - rect.top < rect.height / 2 ? 'before' : 'after'
+                        if (!dragOverTarget || dragOverTarget.id !== rule.id || dragOverTarget.pos !== pos) {
+                          setDragOverTarget({ id: rule.id, pos })
+                        }
+                      }}
+                      onDragLeave={(e) => {
+                        if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                          if (dragOverTarget?.id === rule.id) setDragOverTarget(null)
+                        }
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault()
+                        if (draggedRuleId && dragOverTarget && draggedRuleId !== rule.id) {
+                          handleDrop(draggedRuleId, dragOverTarget.id, dragOverTarget.pos)
+                        }
+                        setDraggedRuleId(null)
+                        setDragOverTarget(null)
+                      }}
+                      className={cn(
+                        'relative px-4 sm:px-5 py-3.5 hover:bg-muted/40 transition-colors group',
+                        canWrite && 'cursor-pointer',
+                        !rule.is_active && 'opacity-65 bg-muted/10',
+                        isDragging && 'opacity-30 bg-muted/70 scale-[0.99]',
                       )}
+                      onClick={() => {
+                        if (canWrite) openEdit(rule)
+                      }}
+                    >
+                      {/* Glowing insertion line */}
+                      {isOverTop && (
+                        <div className="absolute -top-[1.5px] left-2 right-2 h-[3px] bg-primary rounded-full shadow-[0_0_8px_rgba(var(--primary),0.8)] z-30 pointer-events-none" />
+                      )}
+                      {isOverBottom && (
+                        <div className="absolute -bottom-[1.5px] left-2 right-2 h-[3px] bg-primary rounded-full shadow-[0_0_8px_rgba(var(--primary),0.8)] z-30 pointer-events-none" />
+                      )}
+
+                      <div className="flex items-start gap-3 sm:gap-4">
+                        {/* Drag Handle & Sequence Badge */}
+                        <div className="flex items-center gap-2 shrink-0 pt-0.5" onClick={(e) => e.stopPropagation()}>
+                          {canReorder ? (
+                            <div
+                              draggable
+                              onDragStart={(e) => {
+                                e.dataTransfer.effectAllowed = 'move'
+                                e.dataTransfer.setData('text/plain', rule.id)
+                                setDraggedRuleId(rule.id)
+                              }}
+                              onDragEnd={() => {
+                                setDraggedRuleId(null)
+                                setDragOverTarget(null)
+                              }}
+                              className="cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-foreground p-0.5 rounded transition-colors"
+                              title="Drag to reorder rule execution"
+                            >
+                              <GripVertical size={16} />
+                            </div>
+                          ) : null}
+                          <span
+                            className={cn(
+                              'text-xs font-bold px-2 py-0.5 rounded-md min-w-8 text-center tabular-nums border shadow-2xs',
+                              rule.is_active
+                                ? 'bg-primary/10 text-primary border-primary/20'
+                                : 'bg-muted text-muted-foreground border-border',
+                            )}
+                            title={`Execution priority #${executionOrder}`}
+                          >
+                            #{executionOrder}
+                          </span>
+                        </div>
+
+                        {/* Rule Details */}
+                        <div className="flex-1 min-w-0">
+                          {/* Title Row */}
+                          <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                            <p className="text-sm font-semibold text-foreground truncate">{rule.name}</p>
+                            
+                            {!rule.is_active ? (
+                              <span className="text-[10px] font-semibold bg-muted text-muted-foreground border border-border px-1.5 py-0.2 rounded-full">
+                                {t('rules.inactive', 'inactive')}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 px-1.5 py-0.2 rounded-full">
+                                {t('rules.filterActive', 'active')}
+                              </span>
+                            )}
+
+                            {hasStopProcessing && (
+                              <span className="text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 px-1.5 py-0.2 rounded-full flex items-center gap-1">
+                                <ShieldAlert size={11} />
+                                {t('rules.stopProcessingBadge', 'Stops further rules')}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Conditions & Actions */}
+                          <div className="space-y-1 text-xs">
+                            {/* IF Conditions */}
+                            <div className="flex items-baseline gap-2">
+                              <span className="font-mono font-bold text-[10px] tracking-wider uppercase text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0">
+                                IF
+                              </span>
+                              <span className="text-muted-foreground font-mono truncate">
+                                {conditionSummary(rule.conditions, rule.conditions_op, t, payees)}
+                              </span>
+                            </div>
+
+                            {/* THEN Actions */}
+                            <div className="flex items-baseline gap-2">
+                              <span className="font-mono font-bold text-[10px] tracking-wider uppercase text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded shrink-0">
+                                THEN
+                              </span>
+                              <span className="text-emerald-600 dark:text-emerald-400 font-medium truncate">
+                                {actionSummary(rule.actions, displayCategories, payees, t)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Actions Right Side */}
+                        {canWrite && (
+                          <div className="flex items-center gap-1 shrink-0 ml-2" onClick={(e) => e.stopPropagation()}>
+                            {/* Toggle Active Button */}
+                            <button
+                              type="button"
+                              onClick={(e) => handleToggleActive(rule, e)}
+                              className={cn(
+                                'p-1.5 rounded-lg border transition-all',
+                                rule.is_active
+                                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 hover:bg-emerald-500/20'
+                                  : 'bg-muted border-border text-muted-foreground hover:text-foreground',
+                              )}
+                              title={rule.is_active ? 'Click to disable rule' : 'Click to enable rule'}
+                            >
+                              <span className="flex items-center gap-1">
+                                <span className={cn('w-2 h-2 rounded-full', rule.is_active ? 'bg-emerald-500' : 'bg-muted-foreground/40')} />
+                              </span>
+                            </button>
+
+                            {/* Duplicate Button */}
+                            <button
+                              type="button"
+                              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                              onClick={() => handleDuplicate(rule)}
+                              title={t('rules.duplicate', 'Duplicate rule')}
+                            >
+                              <Copy size={14} />
+                            </button>
+
+                            {/* Delete Button */}
+                            <button
+                              type="button"
+                              className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10 transition-colors"
+                              onClick={() => setDeletingRule(rule)}
+                              disabled={deleteMutation.isPending}
+                              title={t('common.delete')}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )
-              })}
+                  )
+                })}
+              </div>
+
+              {/* Table / List Footer */}
+              <div className="px-4 py-3 border-t border-border text-xs text-muted-foreground flex items-center justify-between bg-muted/5">
+                <span className="tabular-nums font-medium">
+                  {isFilteringActive
+                    ? t('rules.filteredCount', { filtered: filteredRules.length, total: counts.total })
+                    : `${counts.total} ${counts.total === 1 ? 'rule' : 'rules'}`}
+                </span>
+                <span className="text-[11px] text-muted-foreground/80">
+                  {counts.active} {t('rules.filterActive', 'active')} · {counts.inactive} {t('rules.filterInactive', 'inactive')}
+                </span>
+              </div>
             </div>
           ) : (
             <div className="py-12 px-4 text-center space-y-3">
@@ -1029,7 +1059,7 @@ export default function RulesPage() {
             )}
           </div>
         )}
-      </SectionCard>
+      </div>
 
       <DeleteConfirmationDialog
         open={!!deletingRule}

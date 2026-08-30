@@ -73,7 +73,7 @@ class RuleCreate(BaseModel):
     conditions_op: str = "and"
     conditions: list[RuleConditionNode]
     actions: list[RuleAction]
-    priority: int = 0
+    priority: Optional[int] = None
     is_active: bool = True
     apply_to_existing: bool = True
     overwrite_existing_categories: bool = False

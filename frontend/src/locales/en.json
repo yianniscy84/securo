@@ -967,13 +967,18 @@
     "allCategories": "All Categories",
     "clearFilters": "Clear filters",
     "noRulesMatching": "No rules matching \"{{query}}\"",
+    "filteredCount": "{{filtered}} / {{total}} rules",
     "executionOrder": "Execution Order",
+    "sortLabel": "Sort by",
+    "sortByExecution": "Execution Order",
+    "sortByNameAsc": "Name (A to Z)",
+    "sortByNameDesc": "Name (Z to A)",
+    "sortByCategoryAsc": "Category (A to Z)",
+    "sortByCategoryDesc": "Category (Z to A)",
     "duplicate": "Duplicate rule",
     "stopProcessingAction": "Stop processing further rules",
     "stopProcessingHint": "(no subsequent rules will run for this transaction)",
-    "stopProcessingBadge": "Stops further rules",
-    "rulesCount": "{{count}} rules",
-    "rulesCount_one": "{{count}} rule"
+    "stopProcessingBadge": "Stops further rules"
   },
   "categories": {
     "title": "Categories",

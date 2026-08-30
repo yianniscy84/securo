@@ -914,7 +914,7 @@ async def test_import_rules_overwrites_existing_rules_and_maps_categories_by_nam
     )
 
     assert response.status_code == 200
-    assert response.json() == {"imported": 1, "skipped": 1, "overwritten": 3}
+    assert response.json() == {"imported": 1, "skipped": 1, "overwritten": 3, "categories_created": 0}
     rules_response = await client.get("/api/rules", headers=auth_headers)
     rules = rules_response.json()
     assert [r["name"] for r in rules] == ["Imported Netflix"]
@@ -950,7 +950,7 @@ async def test_import_rules_with_overwrite_preserves_existing_when_every_rule_is
     )
 
     assert response.status_code == 200
-    assert response.json() == {"imported": 0, "skipped": 1, "overwritten": 0}
+    assert response.json() == {"imported": 0, "skipped": 1, "overwritten": 0, "categories_created": 0}
     after_response = await client.get("/api/rules", headers=auth_headers)
     assert [rule["name"] for rule in after_response.json()] == before_names
 
