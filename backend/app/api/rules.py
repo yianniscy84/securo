@@ -172,6 +172,7 @@ async def import_rules(
             ctx.user_id,
             data.payload,
             overwrite=data.overwrite,
+            create_missing_categories=data.create_missing_categories,
         )
     except DuplicateRuleError:
         raise HTTPException(

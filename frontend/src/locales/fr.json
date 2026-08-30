@@ -962,7 +962,19 @@
     "stopProcessingHint": "(aucune règle suivante ne sera exécutée pour cette transaction)",
     "stopProcessingBadge": "Arrête les règles suivantes",
     "rulesCount": "{{count}} règles",
-    "rulesCount_one": "{{count}} règle"
+    "rulesCount_one": "{{count}} règle",
+    "importReadyCount": "{{count}} règles prêtes à être importées",
+    "importReadyCount_one": "{{count}} règle prête à être importée",
+    "importSkippedCount": "{{count}} règles seront ignorées",
+    "importSkippedCount_one": "{{count}} règle sera ignorée",
+    "importReasonMissingCategory": "Catégorie \"{{category}}\" introuvable",
+    "importReasonMissingAccount": "Compte référencé introuvable",
+    "importReasonMissingPayee": "Bénéficiaire référencé introuvable",
+    "importReasonDuplicateName": "Nom en double dans le fichier",
+    "createMissingCategoriesLabel": "Créer les catégories manquantes",
+    "createMissingCategoriesHint": "Les catégories nécessaires aux règles importées seront créées automatiquement",
+    "categoriesToCreate": "{{count}} catégories seront créées",
+    "categoriesToCreate_one": "{{count}} catégorie sera créée"
   },
   "categories": {
     "title": "Catégories",

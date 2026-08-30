@@ -45,6 +45,7 @@ import {
   Copy,
   ShieldAlert,
   SlidersHorizontal,
+  AlertTriangle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PageHeader } from '@/components/page-header'
@@ -165,6 +166,20 @@ function actionSummary(
   }).join('  ') || t('rules.noActions')
 }
 
+interface ImportPreAnalysisItem {
+  name: string
+  valid: boolean
+  reason?: string
+}
+
+interface ImportPreAnalysis {
+  total: number
+  readyCount: number
+  skippedCount: number
+  categoriesToCreate: string[]
+  items: ImportPreAnalysisItem[]
+}
+
 export default function RulesPage() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -174,6 +189,7 @@ export default function RulesPage() {
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [pendingImport, setPendingImport] = useState<RuleExportPayload | null>(null)
   const [pendingImportName, setPendingImportName] = useState('')
+  const [createMissingCategories, setCreateMissingCategories] = useState(true)
   const importInputRef = useRef<HTMLInputElement | null>(null)
   const [editing, setEditing] = useState<Rule | null>(null)
   const [deletingRule, setDeletingRule] = useState<Rule | null>(null)
@@ -430,10 +446,14 @@ export default function RulesPage() {
   })
 
   const importMutation = useMutation({
-    mutationFn: (payload: RuleExportPayload) => rulesApi.importFile(payload, true),
+    mutationFn: (payload: RuleExportPayload) =>
+      rulesApi.importFile(payload, true, createMissingCategories),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['rules'] })
       queryClient.invalidateQueries({ queryKey: ['rule-packs'] })
+      if ((data.categories_created ?? 0) > 0) {
+        queryClient.invalidateQueries({ queryKey: ['categories'] })
+      }
       setImportDialogOpen(false)
       setPendingImport(null)
       setPendingImportName('')
@@ -458,6 +478,99 @@ export default function RulesPage() {
       if (importInputRef.current) importInputRef.current.value = ''
     }
   }
+
+  const importAnalysis = useMemo<ImportPreAnalysis | null>(() => {
+    if (!pendingImport) return null
+
+    const categoryNames = new Set(displayCategories.map(c => c.name.toLowerCase()))
+    const categoryIds = new Set(displayCategories.map(c => String(c.id)))
+    const accountIds = new Set((accountsList ?? []).map(a => String(a.id)))
+    const payeeIds = new Set(payees.map(p => String(p.id)))
+
+    const seenNames = new Set<string>()
+    const items: ImportPreAnalysisItem[] = []
+    const categoriesToCreate = new Set<string>()
+    let readyCount = 0
+    let skippedCount = 0
+
+    for (const rule of pendingImport.rules) {
+      if (seenNames.has(rule.name)) {
+        skippedCount++
+        items.push({
+          name: rule.name,
+          valid: false,
+          reason: t('rules.importReasonDuplicateName', 'Duplicate name in file'),
+        })
+        continue
+      }
+      seenNames.add(rule.name)
+
+      let skipReason: string | null = null
+
+      const leafConditions = flattenConditions(rule.conditions)
+      for (const c of leafConditions) {
+        if (c.field === 'account_id') {
+          const val = String(c.value ?? '')
+          if (!accountIds.has(val)) {
+            skipReason = t('rules.importReasonMissingAccount', 'Referenced account not found')
+            break
+          }
+        } else if (c.field === 'payee_id') {
+          const val = String(c.value ?? '')
+          if (!payeeIds.has(val)) {
+            skipReason = t('rules.importReasonMissingPayee', 'Referenced payee not found')
+            break
+          }
+        }
+      }
+
+      if (!skipReason) {
+        for (const a of rule.actions || []) {
+          if (a.op === 'set_category') {
+            const val = String(a.value ?? '').trim()
+            const exists = categoryNames.has(val.toLowerCase()) || categoryIds.has(val)
+            if (!exists) {
+              if (createMissingCategories && val) {
+                categoriesToCreate.add(val)
+              } else {
+                skipReason = t('rules.importReasonMissingCategory', { category: val })
+                break
+              }
+            }
+          } else if (a.op === 'set_payee') {
+            const val = String(a.value ?? '')
+            if (!payeeIds.has(val)) {
+              skipReason = t('rules.importReasonMissingPayee', 'Referenced payee not found')
+              break
+            }
+          }
+        }
+      }
+
+      if (skipReason) {
+        skippedCount++
+        items.push({
+          name: rule.name,
+          valid: false,
+          reason: skipReason,
+        })
+      } else {
+        readyCount++
+        items.push({
+          name: rule.name,
+          valid: true,
+        })
+      }
+    }
+
+    return {
+      total: pendingImport.rules.length,
+      readyCount,
+      skippedCount,
+      categoriesToCreate: Array.from(categoriesToCreate),
+      items,
+    }
+  }, [pendingImport, createMissingCategories, displayCategories, accountsList, payees, t])
 
   function handleDrop(sourceId: string, targetId: string, position: 'before' | 'after') {
     if (sourceId === targetId) return
@@ -933,19 +1046,114 @@ export default function RulesPage() {
       />
 
       <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>{t('rules.importConfirmTitle')}</DialogTitle>
+        <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col p-0 overflow-hidden">
+          <DialogHeader className="px-6 pt-5 pb-3 border-b border-border/50 shrink-0">
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Upload size={18} className="text-primary" />
+              <span>{t('rules.importConfirmTitle')}</span>
+            </DialogTitle>
           </DialogHeader>
-          <div className="space-y-3 text-sm text-muted-foreground">
-            <p>{t('rules.importConfirmDescription', { count: pendingImport?.rules.length ?? 0, file: pendingImportName })}</p>
-            <p className="font-medium text-amber-600">{t('rules.importOverwriteWarning')}</p>
+
+          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3.5 text-sm">
+            <p className="text-xs text-muted-foreground">
+              {t('rules.importConfirmDescription', { count: pendingImport?.rules.length ?? 0, file: pendingImportName })}
+            </p>
+
+            {/* Option: Create missing categories */}
+            <div className="flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors">
+              <input
+                type="checkbox"
+                id="import-create-missing-categories"
+                checked={createMissingCategories}
+                onChange={(e) => setCreateMissingCategories(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary cursor-pointer"
+              />
+              <div className="space-y-0.5 flex-1 min-w-0">
+                <Label
+                  htmlFor="import-create-missing-categories"
+                  className="text-xs font-semibold text-foreground cursor-pointer block"
+                >
+                  {t('rules.createMissingCategoriesLabel', 'Create missing categories')}
+                </Label>
+                <p className="text-[11px] text-muted-foreground leading-tight">
+                  {t('rules.createMissingCategoriesHint', 'Categories needed by imported rules will be created automatically')}
+                </p>
+              </div>
+            </div>
+
+            {/* Pre-Import Analysis Cards */}
+            {importAnalysis && (
+              <div className="space-y-2.5">
+                {/* Ready to Import Card */}
+                <div className="flex items-center justify-between p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs">
+                  <span className="font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                    <Check size={14} className="text-emerald-600" />
+                    {t('rules.importReadyCount', { count: importAnalysis.readyCount })}
+                  </span>
+                  <span className="text-emerald-600 font-bold tabular-nums">{importAnalysis.readyCount}</span>
+                </div>
+
+                {/* Categories to Create Card with Scrollable Chips */}
+                {createMissingCategories && importAnalysis.categoriesToCreate.length > 0 && (
+                  <div className="p-2.5 rounded-lg bg-primary/10 border border-primary/20 text-xs space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-primary flex items-center gap-1.5">
+                        <Package size={14} className="text-primary" />
+                        {t('rules.categoriesToCreate', { count: importAnalysis.categoriesToCreate.length })}
+                      </span>
+                      <span className="text-primary font-bold tabular-nums">{importAnalysis.categoriesToCreate.length}</span>
+                    </div>
+                    <div className="max-h-24 overflow-y-auto flex flex-wrap gap-1.5 pt-0.5">
+                      {importAnalysis.categoriesToCreate.map((catName, idx) => (
+                        <span
+                          key={idx}
+                          className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-background/80 border border-primary/25 text-foreground shadow-2xs"
+                        >
+                          {catName}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Skipped Rules Card */}
+                {importAnalysis.skippedCount > 0 && (
+                  <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs overflow-hidden">
+                    <div className="flex items-center justify-between p-2.5">
+                      <span className="font-semibold text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+                        <AlertTriangle size={14} className="text-amber-600" />
+                        {t('rules.importSkippedCount', { count: importAnalysis.skippedCount })}
+                      </span>
+                      <span className="text-amber-600 font-bold tabular-nums">{importAnalysis.skippedCount}</span>
+                    </div>
+
+                    <div className="px-2.5 pb-2.5 pt-0 space-y-1.5 border-t border-amber-500/20 max-h-28 overflow-y-auto">
+                      {importAnalysis.items.filter(i => !i.valid).map((item, idx) => (
+                        <div key={idx} className="flex items-start justify-between gap-2 text-[11px] pt-1">
+                          <span className="font-medium text-foreground truncate">{item.name}</span>
+                          <span className="text-amber-600 dark:text-amber-400 shrink-0 text-[10px]">{item.reason}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-2.5 text-xs text-amber-700 dark:text-amber-400 font-medium">
+              {t('rules.importOverwriteWarning')}
+            </div>
           </div>
-          <div className="flex justify-end gap-2 pt-2">
+
+          <div className="flex justify-end gap-2 px-6 py-3.5 border-t border-border bg-muted/20 shrink-0">
             <Button
               type="button"
               variant="outline"
-              onClick={() => { setImportDialogOpen(false); setPendingImport(null); setPendingImportName('') }}
+              onClick={() => {
+                setImportDialogOpen(false)
+                setPendingImport(null)
+                setPendingImportName('')
+              }}
               disabled={importMutation.isPending}
             >
               {t('common.cancel')}
@@ -953,9 +1161,14 @@ export default function RulesPage() {
             <Button
               type="button"
               variant="destructive"
-              onClick={() => { if (pendingImport) importMutation.mutate(pendingImport) }}
-              disabled={!pendingImport || importMutation.isPending}
+              onClick={() => {
+                if (pendingImport) importMutation.mutate(pendingImport)
+              }}
+              disabled={!pendingImport || importMutation.isPending || (importAnalysis?.readyCount ?? 0) === 0}
             >
+              {importMutation.isPending ? (
+                <RefreshCw size={14} className="animate-spin mr-1.5" />
+              ) : null}
               {t('rules.confirmOverwriteImport')}
             </Button>
           </div>

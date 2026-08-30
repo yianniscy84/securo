@@ -3,6 +3,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.account import Account
@@ -512,6 +513,87 @@ async def test_import_rules_skips_invalid_rules(
     assert result.imported == 1
     assert result.skipped == 2
 
+
+@pytest.mark.asyncio
+async def test_import_rules_skips_missing_accounts_and_categories(
+    session: AsyncSession, test_user, test_workspace
+):
+    category = Category(
+        user_id=test_user.id,
+        workspace_id=test_workspace.id,
+        name="Groceries",
+        icon="cart",
+        color="#10b981",
+    )
+    session.add(category)
+    await session.commit()
+
+    payload = RuleExportPayload(
+        rules=[
+            RuleExportItem(
+                name="Valid Category and no account constraint",
+                conditions=[RuleCondition(field="description", op="contains", value="Market")],
+                actions=[RuleAction(op="set_category", value="Groceries")],
+            ),
+            RuleExportItem(
+                name="Missing Account Constraint",
+                conditions=[
+                    RuleCondition(field="description", op="contains", value="Market"),
+                    RuleCondition(field="account_id", op="equals", value=str(uuid.uuid4())),
+                ],
+                actions=[RuleAction(op="set_category", value="Groceries")],
+            ),
+            RuleExportItem(
+                name="Missing Category Target",
+                conditions=[RuleCondition(field="description", op="contains", value="Gym")],
+                actions=[RuleAction(op="set_category", value="NonExistentCategory")],
+            ),
+        ]
+    )
+
+    result = await import_rules(
+        session, test_workspace.id, test_user.id, payload, overwrite=True
+    )
+
+    assert result.imported == 1
+    assert result.skipped == 2
+
+
+@pytest.mark.asyncio
+async def test_import_rules_creates_missing_categories(
+    session: AsyncSession, test_user, test_workspace
+):
+    payload = RuleExportPayload(
+        rules=[
+            RuleExportItem(
+                name="Create Category Rule",
+                conditions=[RuleCondition(field="description", op="contains", value="Gym")],
+                actions=[RuleAction(op="set_category", value="Fitness & Health")],
+            ),
+        ]
+    )
+
+    result = await import_rules(
+        session,
+        test_workspace.id,
+        test_user.id,
+        payload,
+        overwrite=True,
+        create_missing_categories=True,
+    )
+
+    assert result.imported == 1
+    assert result.skipped == 0
+    assert result.categories_created == 1
+
+    cat_res = await session.execute(
+        select(Category).where(
+            Category.workspace_id == test_workspace.id,
+            Category.name == "Fitness & Health",
+        )
+    )
+    cat = cat_res.scalar_one_or_none()
+    assert cat is not None
 
 
 @pytest.mark.asyncio

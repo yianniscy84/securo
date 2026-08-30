@@ -494,6 +494,7 @@ export interface RuleImportResponse {
   imported: number
   skipped: number
   overwritten: number
+  categories_created?: number
 }
 
 /** One matched transaction in a rule preview, with the category the draft rule

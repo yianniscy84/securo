@@ -966,8 +966,12 @@ export const rules = {
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
   },
-  importFile: async (payload: RuleExportPayload, overwrite = false): Promise<RuleImportResponse> => {
-    const { data } = await api.post('/rules/import', { payload, overwrite })
+  importFile: async (payload: RuleExportPayload, overwrite = false, createMissingCategories = false): Promise<RuleImportResponse> => {
+    const { data } = await api.post('/rules/import', {
+      payload,
+      overwrite,
+      create_missing_categories: createMissingCategories,
+    })
     return data
   },
   packs: async (): Promise<{ code: string; name: string; flag: string; rule_count: number; installed: boolean }[]> => {

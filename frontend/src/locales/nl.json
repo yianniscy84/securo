@@ -962,7 +962,19 @@
     "stopProcessingHint": "(geen volgende regels worden uitgevoerd voor deze transactie)",
     "stopProcessingBadge": "Stopt volgende regels",
     "rulesCount": "{{count}} regels",
-    "rulesCount_one": "{{count}} regel"
+    "rulesCount_one": "{{count}} regel",
+    "importReadyCount": "{{count}} regels klaar om te importeren",
+    "importReadyCount_one": "{{count}} regel klaar om te importeren",
+    "importSkippedCount": "{{count}} regels worden overgeslagen",
+    "importSkippedCount_one": "{{count}} regel wordt overgeslagen",
+    "importReasonMissingCategory": "Categorie \"{{category}}\" niet gevonden",
+    "importReasonMissingAccount": "Gereferenceerde rekening niet gevonden",
+    "importReasonMissingPayee": "Gereferenceerde begunstigde niet gevonden",
+    "importReasonDuplicateName": "Dubbele naam in bestand",
+    "createMissingCategoriesLabel": "Ontbrekende categorieën aanmaken",
+    "createMissingCategoriesHint": "Categorieën die nodig zijn voor geïmporteerde regels worden automatisch aangemaakt",
+    "categoriesToCreate": "{{count}} categorieën worden aangemaakt",
+    "categoriesToCreate_one": "{{count}} categorie wordt aangemaakt"
   },
   "categories": {
     "title": "Categorieën",

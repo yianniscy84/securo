@@ -131,12 +131,14 @@ class RuleExportPayload(BaseModel):
 class RuleImportRequest(BaseModel):
     payload: RuleExportPayload
     overwrite: bool = False
+    create_missing_categories: bool = False
 
 
 class RuleImportResponse(BaseModel):
     imported: int
     skipped: int
     overwritten: int
+    categories_created: int = 0
 
 
 class RulePreviewRequest(BaseModel):

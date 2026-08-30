@@ -8,6 +8,7 @@ from sqlalchemy.orm import load_only
 
 from app.models.rule import Rule
 from app.models.category import Category
+from app.models.account import Account
 from app.models.payee import Payee
 from app.models.transaction import Transaction
 
@@ -972,12 +973,13 @@ async def import_rules(
     user_id: uuid.UUID,
     payload: RuleExportPayload,
     overwrite: bool = False,
+    create_missing_categories: bool = False,
 ) -> RuleImportResponse:
     """Import a portable rules payload into a workspace.
 
     Existing rules are only replaced when the caller explicitly passes
     `overwrite=True`. Rules whose `set_category` target cannot be matched by
-    category name are skipped.
+    category name are skipped unless `create_missing_categories=True`.
     """
     existing = await get_rules(session, workspace_id)
     if existing and not overwrite:
@@ -986,10 +988,23 @@ async def import_rules(
     category_result = await session.execute(
         select(Category).where(Category.workspace_id == workspace_id)
     )
-    categories_by_name = {cat.name: str(cat.id) for cat in category_result.scalars().all()}
+    categories = category_result.scalars().all()
+    categories_by_name = {cat.name: str(cat.id) for cat in categories}
+    categories_by_id = {str(cat.id) for cat in categories}
+
+    account_result = await session.execute(
+        select(Account.id).where(Account.workspace_id == workspace_id)
+    )
+    account_ids = {str(row[0]) for row in account_result.all()}
+
+    payee_result = await session.execute(
+        select(Payee.id).where(Payee.workspace_id == workspace_id)
+    )
+    payee_ids = {str(row[0]) for row in payee_result.all()}
 
     imported = 0
     skipped = 0
+    categories_created = 0
     rules_to_create: list[Rule] = []
     seen_names: set[str] = set()
 
@@ -998,36 +1013,88 @@ async def import_rules(
             skipped += 1
             continue
         seen_names.add(incoming.name)
-        resolved_actions = []
         missing_required_reference = False
+
+        raw_conditions = [condition.model_dump() for condition in incoming.conditions]
+        for cond in _flatten_conditions(raw_conditions):
+            field = _rule_item_value(cond, "field")
+            val = str(_rule_item_value(cond, "value") or "")
+            if field == "account_id":
+                if val not in account_ids:
+                    missing_required_reference = True
+                    break
+            elif field == "payee_id":
+                if val not in payee_ids:
+                    missing_required_reference = True
+                    break
+
+        if missing_required_reference:
+            skipped += 1
+            continue
+
+        resolved_actions = []
         for action in incoming.actions:
             action_data = action.model_dump()
             if action_data["op"] == "set_category":
                 category_id = categories_by_name.get(str(action_data["value"]))
                 if not category_id:
+                    if str(action_data["value"]) in categories_by_id:
+                        category_id = str(action_data["value"])
+                    elif create_missing_categories:
+                        raw_cat_name = str(action_data["value"]).strip()
+                        matched_default = None
+                        for _k, _v in DEFAULT_CATEGORIES_I18N.items():
+                            if raw_cat_name.lower() in [s.lower() for s in _v.values() if isinstance(s, str)] or raw_cat_name.lower() == _k.lower():
+                                matched_default = _v
+                                break
+
+                        new_cat = Category(
+                            user_id=user_id,
+                            workspace_id=workspace_id,
+                            name=raw_cat_name,
+                            icon=matched_default["icon"] if matched_default else "tag",
+                            color=matched_default["color"] if matched_default else "#64748b",
+                            is_system=False,
+                            group_id=None,
+                            treat_as_transfer=matched_default.get("treat_as_transfer", False) if matched_default else False,
+                        )
+                        session.add(new_cat)
+                        await session.flush()
+                        category_id = str(new_cat.id)
+                        categories_by_name[raw_cat_name] = category_id
+                        categories_by_id.add(category_id)
+                        categories_created += 1
+                    else:
+                        missing_required_reference = True
+                        break
+                action_data["value"] = category_id
+            elif action_data["op"] == "set_payee":
+                if str(action_data["value"]) not in payee_ids:
                     missing_required_reference = True
                     break
-                action_data["value"] = category_id
             resolved_actions.append(action_data)
+
         if missing_required_reference:
             skipped += 1
             continue
+
         try:
             await _validate_rule_definition(
                 session,
                 workspace_id,
-                [condition.model_dump() for condition in incoming.conditions],
+                raw_conditions,
                 resolved_actions,
             )
         except ValueError:
             skipped += 1
             continue
+
         rules_to_create.append(Rule(
             user_id=user_id,
             workspace_id=workspace_id,
             name=incoming.name,
             conditions_op=incoming.conditions_op,
-            conditions=[condition.model_dump() for condition in incoming.conditions],
+            conditions=raw_conditions,
             actions=resolved_actions,
             priority=incoming.priority,
             is_active=incoming.is_active,
@@ -1043,7 +1110,12 @@ async def import_rules(
         imported += 1
 
     await session.commit()
-    return RuleImportResponse(imported=imported, skipped=skipped, overwritten=overwritten)
+    return RuleImportResponse(
+        imported=imported,
+        skipped=skipped,
+        overwritten=overwritten,
+        categories_created=categories_created,
+    )
 
 
 async def get_rule(session: AsyncSession, rule_id: uuid.UUID, workspace_id: uuid.UUID) -> Optional[Rule]:

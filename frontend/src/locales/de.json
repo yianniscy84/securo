@@ -962,7 +962,19 @@
     "stopProcessingHint": "(für diese Transaktion werden keine nachfolgenden Regeln ausgeführt)",
     "stopProcessingBadge": "Stoppt weitere Regeln",
     "rulesCount": "{{count}} Regeln",
-    "rulesCount_one": "{{count}} Regel"
+    "rulesCount_one": "{{count}} Regel",
+    "importReadyCount": "{{count}} Regeln bereit zum Importieren",
+    "importReadyCount_one": "{{count}} Regel bereit zum Importieren",
+    "importSkippedCount": "{{count}} Regeln werden übersprungen",
+    "importSkippedCount_one": "{{count}} Regel wird übersprungen",
+    "importReasonMissingCategory": "Kategorie \"{{category}}\" nicht gefunden",
+    "importReasonMissingAccount": "Referenziertes Konto nicht gefunden",
+    "importReasonMissingPayee": "Referenzierter Zahlungsempfänger nicht gefunden",
+    "importReasonDuplicateName": "Doppelter Name in der Datei",
+    "createMissingCategoriesLabel": "Fehlende Kategorien erstellen",
+    "createMissingCategoriesHint": "Für importierte Regeln benötigte Kategorien werden automatisch erstellt",
+    "categoriesToCreate": "{{count}} Kategorien werden erstellt",
+    "categoriesToCreate_one": "{{count}} Kategorie wird erstellt"
   },
   "categories": {
     "title": "Kategorien",

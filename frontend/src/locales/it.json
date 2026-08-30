@@ -962,7 +962,19 @@
     "stopProcessingHint": "(nessuna regola successiva verrà eseguita per questa transazione)",
     "stopProcessingBadge": "Interrompe regole successive",
     "rulesCount": "{{count}} regole",
-    "rulesCount_one": "{{count}} regola"
+    "rulesCount_one": "{{count}} regola",
+    "importReadyCount": "{{count}} regole pronte per l’importazione",
+    "importReadyCount_one": "{{count}} regola pronta per l’importazione",
+    "importSkippedCount": "{{count}} regole verranno ignorate",
+    "importSkippedCount_one": "{{count}} regola verrà ignorata",
+    "importReasonMissingCategory": "Categoria \"{{category}}\" non trovata",
+    "importReasonMissingAccount": "Conto di riferimento non trovato",
+    "importReasonMissingPayee": "Beneficiario di riferimento non trovato",
+    "importReasonDuplicateName": "Nome duplicato nel file",
+    "createMissingCategoriesLabel": "Crea categorie mancanti",
+    "createMissingCategoriesHint": "Le categorie necessarie per le regole importate verranno create automaticamente",
+    "categoriesToCreate": "Verranno create {{count}} categorie",
+    "categoriesToCreate_one": "Verrà creata {{count}} categoria"
   },
   "categories": {
     "title": "Categorie",
