@@ -18,7 +18,7 @@ export function isInvalidDescriptionAction(action: RuleAction): boolean {
  */
 export function previewableActions(actions: RuleAction[]): RuleAction[] {
   return actions.filter((action) => {
-    if (action.op === 'ignore') return true
+    if (action.op === 'ignore' || action.op === 'stop_processing') return true
     if (isInvalidDescriptionAction(action)) return false
     return String(action.value ?? '').trim() !== ''
   })

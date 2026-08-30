@@ -630,6 +630,34 @@ async def test_conflicting_rules_priority(
 
 
 @pytest.mark.asyncio
+async def test_reorder_rules_api(
+    client: AsyncClient, auth_headers, test_categories,
+):
+    cat_id = str(test_categories[0].id)
+    r1 = (await client.post("/api/rules", json={
+        "name": "API Rule 1",
+        "conditions": [{"field": "description", "op": "contains", "value": "1"}],
+        "actions": [{"op": "set_category", "value": cat_id}],
+    }, headers=auth_headers)).json()
+    r2 = (await client.post("/api/rules", json={
+        "name": "API Rule 2",
+        "conditions": [{"field": "description", "op": "contains", "value": "2"}],
+        "actions": [{"op": "set_category", "value": cat_id}],
+    }, headers=auth_headers)).json()
+
+    # Reorder [r2, r1]
+    reorder_resp = await client.put(
+        "/api/rules/reorder",
+        json={"rule_ids": [r2["id"], r1["id"]]},
+        headers=auth_headers,
+    )
+    assert reorder_resp.status_code == 200
+    reordered = reorder_resp.json()
+    reordered_ids = [r["id"] for r in reordered if r["id"] in (r1["id"], r2["id"])]
+    assert reordered_ids == [r2["id"], r1["id"]]
+
+
+@pytest.mark.asyncio
 async def test_tag_attribution_via_rules(
     client: AsyncClient, auth_headers, test_transactions, test_categories,
 ):

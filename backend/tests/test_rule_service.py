@@ -34,6 +34,7 @@ from app.services.rule_service import (
     get_rules,
     import_rules,
     install_rule_pack,
+    reorder_rules,
     update_rule,
 )
 from app.services.transaction_service import update_transaction
@@ -158,6 +159,90 @@ async def test_delete_rule(session: AsyncSession, test_user, test_workspace, tes
 @pytest.mark.asyncio
 async def test_delete_rule_not_found(session: AsyncSession, test_user, test_workspace):
     assert await delete_rule(session, uuid.uuid4(), test_workspace.id) is False
+
+
+@pytest.mark.asyncio
+async def test_reorder_rules(session: AsyncSession, test_user, test_workspace, test_categories):
+    r1 = await create_rule(
+        session, test_workspace.id, test_user.id,
+        RuleCreate(
+            name="Rule 1",
+            conditions=[RuleCondition(field="description", op="contains", value="1")],
+            actions=[RuleAction(op="set_category", value=str(test_categories[0].id))],
+            priority=10,
+        ),
+    )
+    r2 = await create_rule(
+        session, test_workspace.id, test_user.id,
+        RuleCreate(
+            name="Rule 2",
+            conditions=[RuleCondition(field="description", op="contains", value="2")],
+            actions=[RuleAction(op="set_category", value=str(test_categories[0].id))],
+            priority=20,
+        ),
+    )
+    r3 = await create_rule(
+        session, test_workspace.id, test_user.id,
+        RuleCreate(
+            name="Rule 3",
+            conditions=[RuleCondition(field="description", op="contains", value="3")],
+            actions=[RuleAction(op="set_category", value=str(test_categories[0].id))],
+            priority=30,
+        ),
+    )
+
+    # Reorder to [r3, r1, r2]
+    reordered = await reorder_rules(session, test_workspace.id, [r3.id, r1.id, r2.id])
+    assert [r.id for r in reordered] == [r3.id, r1.id, r2.id]
+    assert reordered[0].priority == 0
+    assert reordered[1].priority == 10
+    assert reordered[2].priority == 20
+
+
+@pytest.mark.asyncio
+async def test_stop_processing_action(session: AsyncSession, test_user, test_workspace, test_account, test_categories):
+    # Rule 1 matches and sets category + stop_processing
+    await create_rule(
+        session, test_workspace.id, test_user.id,
+        RuleCreate(
+            name="Specific Rule with Stop",
+            conditions=[RuleCondition(field="description", op="contains", value="SPECIAL")],
+            actions=[
+                RuleAction(op="set_category", value=str(test_categories[0].id)),
+                RuleAction(op="stop_processing"),
+            ],
+            priority=10,
+        ),
+    )
+    # Rule 2 matches as well, but would append notes
+    await create_rule(
+        session, test_workspace.id, test_user.id,
+        RuleCreate(
+            name="Generic Rule",
+            conditions=[RuleCondition(field="description", op="contains", value="SPECIAL")],
+            actions=[RuleAction(op="append_notes", value="TAG_SHOULD_NOT_BE_ADDED")],
+            priority=20,
+        ),
+    )
+
+    tx = Transaction(
+        user_id=test_user.id,
+        workspace_id=test_workspace.id,
+        account_id=test_account.id,
+        amount=Decimal("-10.00"),
+        date=date(2026, 1, 1),
+        description="SPECIAL STORE",
+        currency="BRL",
+        type="debit",
+        source="manual",
+    )
+    session.add(tx)
+    await session.commit()
+
+    await apply_rules_to_transaction(session, test_user.id, tx)
+    assert tx.category_id == test_categories[0].id
+    # Notes from Rule 2 should NOT have been applied because Rule 1 stopped processing
+    assert tx.notes is None or "TAG_SHOULD_NOT_BE_ADDED" not in tx.notes
 
 
 # ---------------------------------------------------------------------------

@@ -931,6 +931,10 @@ export const rules = {
   delete: async (id: string): Promise<void> => {
     await api.delete(`/rules/${id}`)
   },
+  reorder: async (ruleIds: string[]): Promise<Rule[]> => {
+    const { data } = await api.put('/rules/reorder', { rule_ids: ruleIds })
+    return data
+  },
   preview: async (draft: {
     conditions_op: 'and' | 'or'
     conditions: RuleConditionNode[]

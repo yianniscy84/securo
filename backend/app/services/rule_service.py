@@ -2,7 +2,7 @@
 import uuid
 from typing import Any, Optional, cast
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
@@ -44,7 +44,7 @@ _ALLOWED_CONDITION_OPS = {
     "ends_with", "regex", "gt", "gte", "lt", "lte",
 }
 _ALLOWED_ACTION_OPS = {
-    "set_category", "set_payee", "set_description", "append_notes", "ignore",
+    "set_category", "set_payee", "set_description", "append_notes", "ignore", "stop_processing",
 }
 
 
@@ -899,6 +899,36 @@ async def get_rules(session: AsyncSession, workspace_id: uuid.UUID) -> list[Rule
     return list(result.scalars().all())
 
 
+async def reorder_rules(
+    session: AsyncSession, workspace_id: uuid.UUID, rule_ids: list[uuid.UUID]
+) -> list[Rule]:
+    """Atomically update priority for a list of rule IDs in the workspace.
+
+    Sets priority to index * 10 so rules execute in the given sequence order.
+    Rules in the workspace not present in rule_ids keep their relative order
+    after the provided list.
+    """
+    result = await session.execute(
+        select(Rule).where(Rule.workspace_id == workspace_id).order_by(Rule.priority, Rule.id)
+    )
+    all_rules = {rule.id: rule for rule in result.scalars().all()}
+
+    priority_step = 10
+    current_priority = 0
+    for r_id in rule_ids:
+        if r_id in all_rules:
+            all_rules[r_id].priority = current_priority
+            current_priority += priority_step
+
+    for r_id, rule in all_rules.items():
+        if r_id not in rule_ids:
+            rule.priority = current_priority
+            current_priority += priority_step
+
+    await session.commit()
+    return await get_rules(session, workspace_id)
+
+
 
 
 async def export_rules(session: AsyncSession, workspace_id: uuid.UUID) -> RuleExportPayload:
@@ -1035,6 +1065,15 @@ async def create_rule(
 
     await _validate_rule_definition(session, workspace_id, data.conditions, data.actions)
 
+    priority = data.priority
+    if priority == 0:
+        max_priority_res = await session.execute(
+            select(func.max(Rule.priority)).where(Rule.workspace_id == workspace_id)
+        )
+        max_p = max_priority_res.scalar_one_or_none()
+        if max_p is not None:
+            priority = max_p + 10
+
     rule = Rule(
         user_id=user_id,
         workspace_id=workspace_id,
@@ -1042,7 +1081,7 @@ async def create_rule(
         conditions_op=data.conditions_op,
         conditions=[c.model_dump() for c in data.conditions],
         actions=[a.model_dump() for a in data.actions],
-        priority=data.priority,
+        priority=priority,
         is_active=data.is_active,
     )
     session.add(rule)
@@ -1224,6 +1263,8 @@ async def apply_rules_to_transaction(
                 category_set,
                 hidden_category_ids=hidden_categories,
             )
+            if any(a.get("op") == "stop_processing" for a in actions):
+                break
 
 
 def _rule_effect_state(tx: Transaction) -> tuple:

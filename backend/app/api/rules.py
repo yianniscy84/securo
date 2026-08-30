@@ -19,6 +19,7 @@ from app.schemas.rule import (
     RulePreviewRequest,
     RulePreviewResponse,
     RuleRead,
+    RuleReorderRequest,
     RuleUpdate,
 )
 from app.services import rule_service
@@ -76,6 +77,15 @@ async def list_rules(
     session: AsyncSession = Depends(get_async_session),
 ):
     return await rule_service.get_rules(session, ctx.workspace.id)
+
+
+@router.put("/reorder", response_model=list[RuleRead])
+async def reorder_rules(
+    data: RuleReorderRequest,
+    ctx: WorkspaceContext = Depends(current_writable_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    return await rule_service.reorder_rules(session, ctx.workspace.id, data.rule_ids)
 
 
 @router.post("", response_model=RuleCreateResponse, status_code=status.HTTP_201_CREATED)
