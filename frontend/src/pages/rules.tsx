@@ -44,20 +44,32 @@ import {
   Copy,
   AlertTriangle,
   ArrowUpDown,
+  ListFilter,
+  Activity,
+  Tag,
+  Store,
+  EyeClosed,
+  Hash,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PageHeader } from '@/components/page-header'
 import { useWorkspace } from '@/contexts/workspace-context'
 import { RuleDialog } from '@/components/rule-dialog'
-import { CategorySelect } from '@/components/category-select'
 import { findCategoryReference } from '@/lib/category-reference-utils'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuPortal,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { CategoryFilterContent } from '@/components/category-filter-content'
 
 
 
@@ -155,6 +167,39 @@ function actionSummary(
   }).join('  ') || t('rules.noActions')
 }
 
+interface FilterChipProps {
+  icon: React.ReactNode
+  label: string
+  value: string
+  tint?: string
+  onRemove: () => void
+}
+
+function FilterChip({ icon, label, value, tint, onRemove }: FilterChipProps) {
+  return (
+    <button
+      type="button"
+      onClick={onRemove}
+      className="group inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-border/80 bg-muted/50 pl-2 pr-1.5 text-[11.5px] text-foreground transition-colors hover:border-destructive/40 hover:bg-destructive/5"
+      style={tint ? { borderColor: `${tint}55`, backgroundColor: `${tint}12` } : undefined}
+    >
+      <span
+        className="flex items-center text-muted-foreground group-hover:text-destructive"
+        style={tint ? { color: tint } : undefined}
+      >
+        {icon}
+      </span>
+      <span className="text-muted-foreground">{label}:</span>
+      <span className="max-w-[140px] truncate font-medium text-foreground">
+        {value}
+      </span>
+      <span className="ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground/70 group-hover:text-destructive">
+        <X size={11} />
+      </span>
+    </button>
+  )
+}
+
 interface ImportPreAnalysisItem {
   name: string
   valid: boolean
@@ -187,8 +232,15 @@ export default function RulesPage() {
   // Search, Filter & Sort State
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
-  const [categoryFilter, setCategoryFilter] = useState<string>('all')
+  const [categoryFilterIds, setCategoryFilterIds] = useState<string[]>([])
+  const [filterPayeeId, setFilterPayeeId] = useState('')
+  const [filterTag, setFilterTag] = useState('')
+  const [filterIgnore, setFilterIgnore] = useState(false)
   const [sortBy, setSortBy] = useState<'execution' | 'name_asc' | 'name_desc' | 'category_asc' | 'category_desc'>('execution')
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false)
+  const [statusSubOpen, setStatusSubOpen] = useState(false)
+  const [categorySubOpen, setCategorySubOpen] = useState(false)
+  const keepCategorySubOpenRef = useRef(false)
 
   // Drag & drop state
   const [draggedRuleId, setDraggedRuleId] = useState<string | null>(null)
@@ -243,6 +295,34 @@ export default function RulesPage() {
   )
   const payees = useMemo(() => payeesList ?? [], [payeesList])
 
+  const selectedPayee = useMemo(() => payees.find((p) => p.id === filterPayeeId), [payees, filterPayeeId])
+
+  const categorySummary = useMemo(() => {
+    if (categoryFilterIds.length > 1) {
+      return t('transactions.filtersBar.nSelected', { count: categoryFilterIds.length })
+    }
+    if (categoryFilterIds.length === 1) {
+      return displayCategories.find((c) => c.id === categoryFilterIds[0])?.name ?? ''
+    }
+    return ''
+  }, [categoryFilterIds, displayCategories, t])
+
+  const sortByLabel = useMemo(() => {
+    switch (sortBy) {
+      case 'name_asc':
+        return t('rules.sortByNameAsc', 'Name (A to Z)')
+      case 'name_desc':
+        return t('rules.sortByNameDesc', 'Name (Z to A)')
+      case 'category_asc':
+        return t('rules.sortByCategoryAsc', 'Category (A to Z)')
+      case 'category_desc':
+        return t('rules.sortByCategoryDesc', 'Category (Z to A)')
+      case 'execution':
+      default:
+        return t('rules.sortByExecution', 'Execution Order')
+    }
+  }, [sortBy, t])
+
   // Deterministic execution order: sorted by priority ASC, id ASC
   const fullOrderedRules = useMemo(() => {
     return [...(rulesList ?? [])].sort((a, b) => {
@@ -250,6 +330,27 @@ export default function RulesPage() {
       return a.id.localeCompare(b.id)
     })
   }, [rulesList])
+
+  // Available unique hashtags across all rules
+  const availableRuleTags = useMemo(() => {
+    const tagSet = new Set<string>()
+    for (const rule of fullOrderedRules) {
+      for (const a of rule.actions) {
+        if (a.op === 'append_notes' && typeof a.value === 'string') {
+          const matches = a.value.match(/#[\wÀ-ž-]+/g)
+          if (matches) matches.forEach((t) => tagSet.add(t))
+        }
+      }
+      const conds = flattenConditions(rule.conditions)
+      for (const c of conds) {
+        if (c.field === 'notes' && typeof c.value === 'string') {
+          const matches = String(c.value).match(/#[\wÀ-ž-]+/g)
+          if (matches) matches.forEach((t) => tagSet.add(t))
+        }
+      }
+    }
+    return Array.from(tagSet).sort((a, b) => a.localeCompare(b))
+  }, [fullOrderedRules])
 
   // Map each rule ID to its total execution sequence number (#1, #2, #3...)
   const executionOrderMap = useMemo(() => {
@@ -261,7 +362,7 @@ export default function RulesPage() {
   }, [fullOrderedRules])
 
 
-  // Filtered rules based on search query, status, and category
+  // Filtered rules based on search query, status, category, payee, tag, and ignore
   const filteredRules = useMemo(() => {
     let result = [...fullOrderedRules]
 
@@ -271,10 +372,37 @@ export default function RulesPage() {
       result = result.filter(r => !r.is_active)
     }
 
-    if (categoryFilter !== 'all') {
+    if (categoryFilterIds.length > 0) {
       result = result.filter(r => {
-        return r.actions.some(a => a.op === 'set_category' && (String(a.value) === categoryFilter || findCategoryReference(displayCategories, a.value)?.id === categoryFilter))
+        return r.actions.some(a => a.op === 'set_category' && (
+          categoryFilterIds.includes(String(a.value)) ||
+          categoryFilterIds.includes(findCategoryReference(displayCategories, a.value)?.id ?? '')
+        ))
       })
+    }
+
+    if (filterPayeeId) {
+      result = result.filter(r => {
+        if (r.actions.some(a => a.op === 'set_payee' && a.value === filterPayeeId)) return true
+        const conds = flattenConditions(r.conditions)
+        if (conds.some(c => c.field === 'payee_id' && c.value === filterPayeeId)) return true
+        if (selectedPayee && conds.some(c => c.field === 'payee' && String(c.value).toLowerCase() === selectedPayee.name.toLowerCase())) return true
+        return false
+      })
+    }
+
+    if (filterTag) {
+      const normalizedTag = filterTag.toLowerCase()
+      result = result.filter(r => {
+        if (r.actions.some(a => a.op === 'append_notes' && String(a.value).toLowerCase().includes(normalizedTag))) return true
+        const conds = flattenConditions(r.conditions)
+        if (conds.some(c => c.field === 'notes' && String(c.value).toLowerCase().includes(normalizedTag))) return true
+        return false
+      })
+    }
+
+    if (filterIgnore) {
+      result = result.filter(r => r.actions.some(a => a.op === 'ignore'))
     }
 
     if (searchQuery.trim()) {
@@ -339,7 +467,7 @@ export default function RulesPage() {
     }
 
     return result
-  }, [fullOrderedRules, statusFilter, categoryFilter, searchQuery, sortBy, displayCategories, categories, payees])
+  }, [fullOrderedRules, statusFilter, categoryFilterIds, filterPayeeId, filterTag, filterIgnore, searchQuery, sortBy, displayCategories, categories, payees, selectedPayee])
 
   // Counts
   const counts = useMemo(() => {
@@ -349,7 +477,15 @@ export default function RulesPage() {
     return { total, active, inactive }
   }, [fullOrderedRules])
 
-  const isFilteringActive = searchQuery.trim() !== '' || statusFilter !== 'all' || categoryFilter !== 'all'
+  const activeFiltersCount =
+    (statusFilter !== 'all' ? 1 : 0) +
+    (categoryFilterIds.length > 0 ? 1 : 0) +
+    (filterPayeeId ? 1 : 0) +
+    (filterTag ? 1 : 0) +
+    (filterIgnore ? 1 : 0)
+
+  const hasAnyFilter = searchQuery.trim() !== '' || activeFiltersCount > 0
+  const isFilteringActive = hasAnyFilter
   const canReorder = canWrite && !isFilteringActive && sortBy === 'execution'
 
   // Mutations
@@ -636,7 +772,10 @@ export default function RulesPage() {
   function clearAllFilters() {
     setSearchQuery('')
     setStatusFilter('all')
-    setCategoryFilter('all')
+    setCategoryFilterIds([])
+    setFilterPayeeId('')
+    setFilterTag('')
+    setFilterIgnore(false)
     setSortBy('execution')
   }
 
@@ -711,130 +850,402 @@ export default function RulesPage() {
       />
 
       {/* Standalone Filters Bar */}
-      <div className="bg-card rounded-xl border border-border overflow-hidden mb-4 shadow-2xs">
-        <div className="flex flex-wrap items-center justify-between gap-2.5 p-2 sm:p-2.5">
+      <div
+        className={cn(
+          'group/filterbar rounded-xl border border-border bg-card shadow-sm transition-colors mb-4',
+          'focus-within:border-primary/40 focus-within:ring-[3px] focus-within:ring-primary/10',
+        )}
+      >
+        {/* Top row: search input + controls */}
+        <div className="flex items-center gap-1.5 px-2 py-1.5">
           {/* Search Input */}
-          <div className="relative flex-1 min-w-[200px] flex items-center">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/70 pointer-events-none" size={15} />
+          <div className="relative flex min-w-0 flex-1 items-center gap-1 px-2.5 py-1 min-h-9">
+            <Search size={15} className="pointer-events-none shrink-0 text-muted-foreground/70 mr-1.5" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={t('rules.searchPlaceholder', 'Search rules by name, conditions, or actions...')}
-              className="h-8 w-full bg-transparent pl-8 pr-7 text-xs text-foreground placeholder:text-muted-foreground/60 outline-none border-0"
+              className="w-full bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground/70 outline-none border-0"
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5 rounded"
+                className="text-muted-foreground/70 hover:text-foreground p-0.5 rounded"
               >
                 <X size={13} />
               </button>
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            {/* Status Tabs */}
-            <div className="flex items-center gap-0.5 p-0.5 bg-muted/40 border border-border/60 rounded-lg">
-              <button
-                type="button"
-                onClick={() => setStatusFilter('all')}
-                className={cn(
-                  'px-2.5 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1.5',
-                  statusFilter === 'all'
-                    ? 'bg-background border border-border text-foreground shadow-2xs font-semibold'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-background/40',
-                )}
-              >
-                <span>{t('rules.filterAll', 'All')}</span>
-                <span className="text-[10px] px-1.5 py-0.2 bg-muted text-muted-foreground rounded-full font-medium">
-                  {counts.total}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setStatusFilter('active')}
-                className={cn(
-                  'px-2.5 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1.5',
-                  statusFilter === 'active'
-                    ? 'bg-background border border-border text-foreground shadow-2xs font-semibold'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-background/40',
-                )}
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                <span>{t('rules.filterActive', 'Active')}</span>
-                <span className="text-[10px] px-1.5 py-0.2 bg-emerald-500/10 text-emerald-600 rounded-full font-semibold">
-                  {counts.active}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setStatusFilter('inactive')}
-                className={cn(
-                  'px-2.5 py-1 rounded-md text-xs font-medium transition-all flex items-center gap-1.5',
-                  statusFilter === 'inactive'
-                    ? 'bg-background border border-border text-foreground shadow-2xs font-semibold'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-background/40',
-                )}
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50" />
-                <span>{t('rules.filterInactive', 'Inactive')}</span>
-                <span className="text-[10px] px-1.5 py-0.2 bg-muted text-muted-foreground rounded-full font-medium">
-                  {counts.inactive}
-                </span>
-              </button>
-            </div>
-
-            {/* Category Filter */}
-            {displayCategories.length > 0 && (
-              <div className="w-48 shrink-0">
-                <CategorySelect
-                  value={categoryFilter === 'all' ? '' : categoryFilter}
-                  onChange={(val) => setCategoryFilter(val ? val : 'all')}
-                  categories={displayCategories}
-                  groups={categoryGroupsList ?? []}
-                  placeholder={t('rules.allCategories', 'All Categories')}
-                  allowNone={false}
-                  className="h-8 text-xs bg-background/50 border-border/80"
-                />
-              </div>
-            )}
-
-            {/* Sort dropdown */}
-            <Select
-              value={sortBy}
-              onValueChange={(val) => setSortBy(val as 'execution' | 'name_asc' | 'name_desc' | 'category_asc' | 'category_desc')}
-            >
-              <SelectTrigger className="h-8 text-xs bg-background/50 border-border/80 min-w-[145px] gap-2 px-3 shadow-2xs hover:bg-muted/40 transition-colors">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <ArrowUpDown size={12} className="text-muted-foreground shrink-0" />
-                  <SelectValue />
-                </div>
-              </SelectTrigger>
-              <SelectContent align="end" className="text-xs">
-                <SelectItem value="execution" className="text-xs">{t('rules.sortByExecution', 'Execution Order')}</SelectItem>
-                <SelectItem value="name_asc" className="text-xs">{t('rules.sortByNameAsc', 'Name (A to Z)')}</SelectItem>
-                <SelectItem value="name_desc" className="text-xs">{t('rules.sortByNameDesc', 'Name (Z to A)')}</SelectItem>
-                <SelectItem value="category_asc" className="text-xs">{t('rules.sortByCategoryAsc', 'Category (A to Z)')}</SelectItem>
-                <SelectItem value="category_desc" className="text-xs">{t('rules.sortByCategoryDesc', 'Category (Z to A)')}</SelectItem>
-              </SelectContent>
-            </Select>
-
-            {/* Clear filters text button */}
-            {isFilteringActive && (
+          {/* Right-side controls */}
+          <div className="ml-auto flex shrink-0 items-center gap-1 pl-1">
+            {hasAnyFilter && (
               <button
                 type="button"
                 onClick={clearAllFilters}
-                className="text-xs text-muted-foreground hover:text-foreground font-medium px-1.5 py-1 transition-colors"
+                className="hidden h-7 items-center rounded-md px-2 text-[11.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:inline-flex"
               >
-                {t('rules.clearFilters', 'Clear filters')}
+                {t('transactions.clearFilters', 'Clear filters')}
               </button>
             )}
+
+            {/* Filters Dropdown */}
+            <DropdownMenu open={filterMenuOpen} onOpenChange={setFilterMenuOpen}>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={t('transactions.filtersBar.filters', 'Filters')}
+                  className={cn(
+                    'inline-flex h-8 items-center gap-1.5 rounded-md border border-border/80 bg-card px-2.5 text-[12px] font-medium text-muted-foreground transition-colors',
+                    'hover:bg-muted hover:text-foreground',
+                    filterMenuOpen && 'bg-muted text-foreground',
+                    (statusFilter !== 'all' || categoryFilterIds.length > 0) && 'border-primary/30 text-primary hover:text-primary',
+                  )}
+                >
+                  <ListFilter size={13} />
+                  <span className="hidden sm:inline">
+                    {t('transactions.filtersBar.filters', 'Filters')}
+                  </span>
+                  {(statusFilter !== 'all' || categoryFilterIds.length > 0) && (
+                    <span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary/10 px-1 text-[10px] font-semibold text-primary">
+                      {(statusFilter !== 'all' ? 1 : 0) + (categoryFilterIds.length > 0 ? 1 : 0)}
+                    </span>
+                  )}
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                sideOffset={6}
+                className="w-[min(18rem,calc(100vw-2rem))] p-1 sm:w-[240px]"
+              >
+                <DropdownMenuLabel className="px-2 py-1 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/70">
+                  {t('transactions.filtersBar.filterBy', 'Filter by')}
+                </DropdownMenuLabel>
+                <DropdownMenuGroup>
+                  {/* Status Submenu */}
+                  <DropdownMenuSub open={statusSubOpen} onOpenChange={setStatusSubOpen}>
+                    <DropdownMenuSubTrigger className="gap-2 text-[13px]">
+                      <Activity size={14} className="text-muted-foreground" />
+                      <span className="flex-1">{t('rules.status', 'Status')}</span>
+                      {statusFilter !== 'all' && (
+                        <span className="max-w-[90px] truncate text-[11px] text-muted-foreground">
+                          {statusFilter === 'active' ? t('rules.filterActive', 'Active') : t('rules.filterInactive', 'Inactive')}
+                        </span>
+                      )}
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuPortal>
+                      <DropdownMenuSubContent sideOffset={8} className="w-[190px] p-1 text-xs">
+                        <DropdownMenuItem
+                          onSelect={() => {
+                            setStatusFilter('all')
+                            setFilterMenuOpen(false)
+                          }}
+                          className={cn('gap-2 rounded-sm px-2 py-1.5 text-[13px]', statusFilter === 'all' && 'bg-primary/5')}
+                        >
+                          <span className="flex-1">{t('rules.filterAll', 'All')}</span>
+                          <span className="text-[10px] text-muted-foreground tabular-nums">({counts.total})</span>
+                          {statusFilter === 'all' && <Check size={13} className="text-primary" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onSelect={() => {
+                            setStatusFilter('active')
+                            setFilterMenuOpen(false)
+                          }}
+                          className={cn('gap-2 rounded-sm px-2 py-1.5 text-[13px]', statusFilter === 'active' && 'bg-primary/5')}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                          <span className="flex-1">{t('rules.filterActive', 'Active')}</span>
+                          <span className="text-[10px] text-muted-foreground tabular-nums">({counts.active})</span>
+                          {statusFilter === 'active' && <Check size={13} className="text-primary" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onSelect={() => {
+                            setStatusFilter('inactive')
+                            setFilterMenuOpen(false)
+                          }}
+                          className={cn('gap-2 rounded-sm px-2 py-1.5 text-[13px]', statusFilter === 'inactive' && 'bg-primary/5')}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50 shrink-0" />
+                          <span className="flex-1">{t('rules.filterInactive', 'Inactive')}</span>
+                          <span className="text-[10px] text-muted-foreground tabular-nums">({counts.inactive})</span>
+                          {statusFilter === 'inactive' && <Check size={13} className="text-primary" />}
+                        </DropdownMenuItem>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuPortal>
+                  </DropdownMenuSub>
+
+                  {/* Category Submenu */}
+                  {displayCategories.length > 0 && (
+                    <DropdownMenuSub
+                      open={categorySubOpen}
+                      onOpenChange={(open) => {
+                        if (!open && keepCategorySubOpenRef.current) {
+                          keepCategorySubOpenRef.current = false
+                          return
+                        }
+                        setCategorySubOpen(open)
+                      }}
+                    >
+                      <DropdownMenuSubTrigger className="gap-2 text-[13px]">
+                        <Tag size={14} className="text-muted-foreground" />
+                        <span className="flex-1">{t('transactions.category', 'Category')}</span>
+                        {categorySummary && (
+                          <span className="max-w-[90px] truncate text-[11px] text-muted-foreground">
+                            {categorySummary}
+                          </span>
+                        )}
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuPortal>
+                        <DropdownMenuSubContent sideOffset={8} className="max-h-[320px] w-[240px] overflow-y-auto p-1">
+                          <CategoryFilterContent
+                            categoryIds={categoryFilterIds}
+                            onCategoryIdsChange={setCategoryFilterIds}
+                            allowUncategorized={false}
+                            categories={displayCategories}
+                            groups={categoryGroupsList ?? []}
+                            onKeepOpen={() => {
+                              keepCategorySubOpenRef.current = true
+                            }}
+                          />
+                        </DropdownMenuSubContent>
+                      </DropdownMenuPortal>
+                    </DropdownMenuSub>
+                  )}
+
+                  {/* Payee Submenu */}
+                  {payees.length > 0 && (
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger className="gap-2 text-[13px]">
+                        <Store size={14} className="text-muted-foreground" />
+                        <span className="flex-1">{t('payees.payee', 'Payee')}</span>
+                        {selectedPayee && (
+                          <span className="max-w-[90px] truncate text-[11px] text-muted-foreground">
+                            {selectedPayee.name}
+                          </span>
+                        )}
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuPortal>
+                        <DropdownMenuSubContent sideOffset={8} className="max-h-[320px] w-[220px] overflow-y-auto p-1">
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              setFilterPayeeId('')
+                              setFilterMenuOpen(false)
+                            }}
+                            className={cn('gap-2 rounded-sm px-2 py-1.5 text-[13px]', !filterPayeeId && 'bg-primary/5')}
+                          >
+                            <span className="min-w-0 flex-1 truncate text-left">{t('transactions.all', 'All')}</span>
+                            {!filterPayeeId && <Check size={13} className="text-primary" />}
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator className="my-1" />
+                          {payees.map((p) => (
+                            <DropdownMenuItem
+                              key={p.id}
+                              onSelect={() => {
+                                setFilterPayeeId(filterPayeeId === p.id ? '' : p.id)
+                                setFilterMenuOpen(false)
+                              }}
+                              className={cn('gap-2 rounded-sm px-2 py-1.5 text-[13px]', filterPayeeId === p.id && 'bg-primary/5')}
+                            >
+                              <span className="min-w-0 flex-1 truncate text-left">{p.name}</span>
+                              {filterPayeeId === p.id && <Check size={13} className="text-primary" />}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuSubContent>
+                      </DropdownMenuPortal>
+                    </DropdownMenuSub>
+                  )}
+
+                  {/* Tags Submenu */}
+                  {availableRuleTags.length > 0 && (
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger className="gap-2 text-[13px]">
+                        <Hash size={14} className="text-muted-foreground" />
+                        <span className="flex-1">{t('transactions.tags', 'Tags')}</span>
+                        {filterTag && (
+                          <span className="max-w-[90px] truncate text-[11px] text-muted-foreground">
+                            {filterTag}
+                          </span>
+                        )}
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuPortal>
+                        <DropdownMenuSubContent sideOffset={8} className="max-h-[320px] w-[200px] overflow-y-auto p-1">
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              setFilterTag('')
+                              setFilterMenuOpen(false)
+                            }}
+                            className={cn('gap-2 rounded-sm px-2 py-1.5 text-[13px]', !filterTag && 'bg-primary/5')}
+                          >
+                            <span className="min-w-0 flex-1 truncate text-left">{t('transactions.all', 'All')}</span>
+                            {!filterTag && <Check size={13} className="text-primary" />}
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator className="my-1" />
+                          {availableRuleTags.map((tag) => (
+                            <DropdownMenuItem
+                              key={tag}
+                              onSelect={() => {
+                                setFilterTag(filterTag === tag ? '' : tag)
+                                setFilterMenuOpen(false)
+                              }}
+                              className={cn('gap-2 rounded-sm px-2 py-1.5 text-[13px]', filterTag === tag && 'bg-primary/5')}
+                            >
+                              <span className="min-w-0 flex-1 truncate text-left font-medium">{tag}</span>
+                              {filterTag === tag && <Check size={13} className="text-primary" />}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuSubContent>
+                      </DropdownMenuPortal>
+                    </DropdownMenuSub>
+                  )}
+
+                  {/* Ignore Transaction Checkbox Toggle */}
+                  <DropdownMenuItem
+                    onSelect={(e) => {
+                      e.preventDefault()
+                      setFilterIgnore((v) => !v)
+                    }}
+                    className={cn('gap-2 rounded-sm px-2 py-1.5 text-[13px]', filterIgnore && 'bg-primary/5')}
+                  >
+                    <EyeClosed size={14} className="text-muted-foreground" />
+                    <span className="flex-1">{t('rules.ignoreAction', 'Ignore transaction')}</span>
+                    {filterIgnore && <Check size={13} className="text-primary" />}
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+
+                {(statusFilter !== 'all' || categoryFilterIds.length > 0 || filterPayeeId || filterTag || filterIgnore) && (
+                  <>
+                    <DropdownMenuSeparator className="my-1" />
+                    <DropdownMenuItem
+                      onSelect={clearAllFilters}
+                      className="gap-2 rounded-sm px-2 py-1.5 text-[12px] text-muted-foreground"
+                    >
+                      <X size={12} />
+                      <span>{t('transactions.clearFilters', 'Clear all filters')}</span>
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Sort Dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={t('rules.sort', 'Sort')}
+                  className={cn(
+                    'inline-flex h-8 items-center gap-1.5 rounded-md border border-border/80 bg-card px-2.5 text-[12px] font-medium text-muted-foreground transition-colors',
+                    'hover:bg-muted hover:text-foreground',
+                    sortBy !== 'execution' && 'border-primary/30 text-primary hover:text-primary',
+                  )}
+                >
+                  <ArrowUpDown size={13} />
+                  <span className="hidden sm:inline">{sortByLabel}</span>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" sideOffset={6} className="w-[190px] p-1 text-xs">
+                <DropdownMenuLabel className="px-2 py-1 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/70">
+                  {t('rules.sortBy', 'Sort by')}
+                </DropdownMenuLabel>
+                <DropdownMenuGroup>
+                  <DropdownMenuItem
+                    onSelect={() => setSortBy('execution')}
+                    className={cn('gap-2 rounded-sm px-2 py-1.5 text-[13px]', sortBy === 'execution' && 'bg-primary/5')}
+                  >
+                    <span className="flex-1">{t('rules.sortByExecution', 'Execution Order')}</span>
+                    {sortBy === 'execution' && <Check size={13} className="text-primary" />}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => setSortBy('name_asc')}
+                    className={cn('gap-2 rounded-sm px-2 py-1.5 text-[13px]', sortBy === 'name_asc' && 'bg-primary/5')}
+                  >
+                    <span className="flex-1">{t('rules.sortByNameAsc', 'Name (A to Z)')}</span>
+                    {sortBy === 'name_asc' && <Check size={13} className="text-primary" />}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => setSortBy('name_desc')}
+                    className={cn('gap-2 rounded-sm px-2 py-1.5 text-[13px]', sortBy === 'name_desc' && 'bg-primary/5')}
+                  >
+                    <span className="flex-1">{t('rules.sortByNameDesc', 'Name (Z to A)')}</span>
+                    {sortBy === 'name_desc' && <Check size={13} className="text-primary" />}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => setSortBy('category_asc')}
+                    className={cn('gap-2 rounded-sm px-2 py-1.5 text-[13px]', sortBy === 'category_asc' && 'bg-primary/5')}
+                  >
+                    <span className="flex-1">{t('rules.sortByCategoryAsc', 'Category (A to Z)')}</span>
+                    {sortBy === 'category_asc' && <Check size={13} className="text-primary" />}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => setSortBy('category_desc')}
+                    className={cn('gap-2 rounded-sm px-2 py-1.5 text-[13px]', sortBy === 'category_desc' && 'bg-primary/5')}
+                  >
+                    <span className="flex-1">{t('rules.sortByCategoryDesc', 'Category (Z to A)')}</span>
+                    {sortBy === 'category_desc' && <Check size={13} className="text-primary" />}
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
+
+        {/* Active Filter Chips */}
+        {(statusFilter !== 'all' || categoryFilterIds.length > 0 || filterPayeeId || filterTag || filterIgnore) && (
+          <div className="flex flex-wrap items-center gap-1 border-t border-border/60 px-2 py-1.5">
+            {statusFilter !== 'all' && (
+              <FilterChip
+                icon={<Activity size={12} />}
+                label={t('rules.status', 'Status')}
+                value={statusFilter === 'active' ? t('rules.filterActive', 'Active') : t('rules.filterInactive', 'Inactive')}
+                onRemove={() => setStatusFilter('all')}
+              />
+            )}
+
+            {categoryFilterIds.map((id) => {
+              const cat = displayCategories.find((c) => c.id === id)
+              if (!cat) return null
+              return (
+                <FilterChip
+                  key={`cat-${id}`}
+                  icon={<Tag size={12} />}
+                  label={t('transactions.category', 'Category')}
+                  value={cat.name}
+                  tint={cat.color ?? undefined}
+                  onRemove={() => setCategoryFilterIds((prev) => prev.filter((x) => x !== id))}
+                />
+              )
+            })}
+
+            {selectedPayee && (
+              <FilterChip
+                icon={<Store size={12} />}
+                label={t('payees.payee', 'Payee')}
+                value={selectedPayee.name}
+                onRemove={() => setFilterPayeeId('')}
+              />
+            )}
+
+            {filterTag && (
+              <FilterChip
+                icon={<Hash size={12} />}
+                label={t('transactions.tags', 'Tag')}
+                value={filterTag}
+                onRemove={() => setFilterTag('')}
+              />
+            )}
+
+            {filterIgnore && (
+              <FilterChip
+                icon={<EyeClosed size={12} />}
+                label={t('rules.fieldAction', 'Action')}
+                value={t('rules.ignoreAction', 'Ignore transaction')}
+                onRemove={() => setFilterIgnore(false)}
+              />
+            )}
+          </div>
+        )}
       </div>
 
       {/* Rules List Container */}
@@ -1108,29 +1519,29 @@ export default function RulesPage() {
             {importAnalysis && (
               <div className="space-y-2.5">
                 {/* Ready to Import Card */}
-                <div className="flex items-center justify-between p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs">
-                  <span className="font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
-                    <Check size={14} className="text-emerald-600" />
+                <div className="flex items-center justify-between p-2.5 rounded-lg bg-muted/40 border border-border text-xs">
+                  <span className="font-medium text-foreground flex items-center gap-2">
+                    <Check size={14} className="text-emerald-600 dark:text-emerald-400" />
                     {t('rules.importReadyCount', { count: importAnalysis.readyCount })}
                   </span>
-                  <span className="text-emerald-600 font-bold tabular-nums">{importAnalysis.readyCount}</span>
+                  <span className="text-muted-foreground font-semibold tabular-nums">{importAnalysis.readyCount}</span>
                 </div>
 
                 {/* Categories to Create Card with Scrollable Chips */}
                 {createMissingCategories && importAnalysis.categoriesToCreate.length > 0 && (
-                  <div className="p-2.5 rounded-lg bg-primary/10 border border-primary/20 text-xs space-y-1.5">
+                  <div className="p-2.5 rounded-lg bg-muted/40 border border-border text-xs space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="font-semibold text-primary flex items-center gap-1.5">
-                        <Package size={14} className="text-primary" />
+                      <span className="font-medium text-foreground flex items-center gap-2">
+                        <Package size={14} className="text-muted-foreground" />
                         {t('rules.categoriesToCreate', { count: importAnalysis.categoriesToCreate.length })}
                       </span>
-                      <span className="text-primary font-bold tabular-nums">{importAnalysis.categoriesToCreate.length}</span>
+                      <span className="text-muted-foreground font-semibold tabular-nums">{importAnalysis.categoriesToCreate.length}</span>
                     </div>
                     <div className="max-h-24 overflow-y-auto flex flex-wrap gap-1.5 pt-0.5">
                       {importAnalysis.categoriesToCreate.map((catName, idx) => (
                         <span
                           key={idx}
-                          className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-background/80 border border-primary/25 text-foreground shadow-2xs"
+                          className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-background border border-border text-foreground"
                         >
                           {catName}
                         </span>
@@ -1141,20 +1552,20 @@ export default function RulesPage() {
 
                 {/* Skipped Rules Card */}
                 {importAnalysis.skippedCount > 0 && (
-                  <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs overflow-hidden">
+                  <div className="rounded-lg bg-muted/40 border border-border text-xs overflow-hidden">
                     <div className="flex items-center justify-between p-2.5">
-                      <span className="font-semibold text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
-                        <AlertTriangle size={14} className="text-amber-600" />
+                      <span className="font-medium text-foreground flex items-center gap-2">
+                        <AlertTriangle size={14} className="text-amber-600 dark:text-amber-400" />
                         {t('rules.importSkippedCount', { count: importAnalysis.skippedCount })}
                       </span>
-                      <span className="text-amber-600 font-bold tabular-nums">{importAnalysis.skippedCount}</span>
+                      <span className="text-amber-600 dark:text-amber-400 font-semibold tabular-nums">{importAnalysis.skippedCount}</span>
                     </div>
 
-                    <div className="px-2.5 pb-2.5 pt-0 space-y-1.5 border-t border-amber-500/20 max-h-28 overflow-y-auto">
+                    <div className="px-2.5 pb-2.5 pt-0 space-y-1.5 border-t border-border max-h-28 overflow-y-auto">
                       {importAnalysis.items.filter(i => !i.valid).map((item, idx) => (
-                        <div key={idx} className="flex items-start justify-between gap-2 text-[11px] pt-1">
+                        <div key={idx} className="flex items-start justify-between gap-2 text-[11px] pt-1.5">
                           <span className="font-medium text-foreground truncate">{item.name}</span>
-                          <span className="text-amber-600 dark:text-amber-400 shrink-0 text-[10px]">{item.reason}</span>
+                          <span className="text-muted-foreground shrink-0 text-[10px]">{item.reason}</span>
                         </div>
                       ))}
                     </div>

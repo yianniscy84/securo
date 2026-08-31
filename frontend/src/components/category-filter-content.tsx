@@ -18,8 +18,9 @@ function toggleInArray(arr: string[], id: string): string[] {
 interface CategoryFilterContentProps {
   categoryIds: string[]
   onCategoryIdsChange: (ids: string[]) => void
-  filterUncategorized: boolean
-  onUncategorizedChange: (value: boolean) => void
+  filterUncategorized?: boolean
+  onUncategorizedChange?: (value: boolean) => void
+  allowUncategorized?: boolean
   categories: Category[]
   groups: CategoryGroup[]
   onKeepOpen?: () => void
@@ -28,8 +29,9 @@ interface CategoryFilterContentProps {
 export function CategoryFilterContent({
   categoryIds,
   onCategoryIdsChange,
-  filterUncategorized,
+  filterUncategorized = false,
   onUncategorizedChange,
+  allowUncategorized = true,
   categories,
   groups,
   onKeepOpen,
@@ -62,9 +64,10 @@ export function CategoryFilterContent({
   }, [categories, groups, search, t])
 
   const showUncategorized = useMemo(() => {
+    if (!allowUncategorized) return false
     if (!search.trim()) return true
     return normalizeText(t('transactions.uncategorized')).includes(normalizeText(search))
-  }, [search, t])
+  }, [allowUncategorized, search, t])
 
   return (
     <>
