@@ -975,10 +975,7 @@
     "sortByNameDesc": "Name (Z to A)",
     "sortByCategoryAsc": "Category (A to Z)",
     "sortByCategoryDesc": "Category (Z to A)",
-    "duplicate": "Duplicate rule",
-    "stopProcessingAction": "Stop processing further rules",
-    "stopProcessingHint": "(no subsequent rules will run for this transaction)",
-    "stopProcessingBadge": "Stops further rules"
+    "duplicate": "Duplicate rule"
   },
   "categories": {
     "title": "Categories",

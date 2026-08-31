@@ -667,15 +667,10 @@ export function RuleDialog({
                         <option value="set_payee">{t('rules.setPayee')}</option>
                         <option value="append_notes">{t('rules.appendNotes')}</option>
                         <option value="ignore">{t('rules.ignoreAction')}</option>
-                        <option value="stop_processing">{t('rules.stopProcessingAction')}</option>
                       </select>
                       {action.op === 'ignore' ? (
                         <span className="min-w-0 text-sm italic text-muted-foreground sm:w-0 sm:flex-1">
                           {t('rules.ignoreActionHint')}
-                        </span>
-                      ) : action.op === 'stop_processing' ? (
-                        <span className="min-w-0 text-sm italic text-muted-foreground sm:w-0 sm:flex-1">
-                          {t('rules.stopProcessingHint')}
                         </span>
                       ) : action.op === 'set_category' ? (
                         <div className="w-full min-w-0 sm:w-0 sm:flex-1">

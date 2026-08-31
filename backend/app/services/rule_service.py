@@ -45,7 +45,7 @@ _ALLOWED_CONDITION_OPS = {
     "ends_with", "regex", "gt", "gte", "lt", "lte",
 }
 _ALLOWED_ACTION_OPS = {
-    "set_category", "set_payee", "set_description", "append_notes", "ignore", "stop_processing",
+    "set_category", "set_payee", "set_description", "append_notes", "ignore",
 }
 
 
@@ -1334,8 +1334,6 @@ async def apply_rules_to_transaction(
                 category_set,
                 hidden_category_ids=hidden_categories,
             )
-            if any(a.get("op") == "stop_processing" for a in actions):
-                break
 
 
 def _rule_effect_state(tx: Transaction) -> tuple:

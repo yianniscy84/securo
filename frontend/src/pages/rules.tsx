@@ -42,7 +42,6 @@ import {
   X,
   GripVertical,
   Copy,
-  ShieldAlert,
   AlertTriangle,
   ArrowUpDown,
 } from 'lucide-react'
@@ -152,7 +151,6 @@ function actionSummary(
     }
     if (a.op === 'append_notes') return `→ ${t('rules.fieldNotes')}: ${a.value}`
     if (a.op === 'ignore') return `→ ${t('rules.ignoreAction')}`
-    if (a.op === 'stop_processing') return `→ 🛑 ${t('rules.stopProcessingBadge')}`
     return a.op
   }).join('  ') || t('rules.noActions')
 }
@@ -247,7 +245,10 @@ export default function RulesPage() {
 
   // Deterministic execution order: sorted by priority ASC, id ASC
   const fullOrderedRules = useMemo(() => {
-    return [...(rulesList ?? [])].sort((a, b) => a.priority - b.priority)
+    return [...(rulesList ?? [])].sort((a, b) => {
+      if (a.priority !== b.priority) return a.priority - b.priority
+      return a.id.localeCompare(b.id)
+    })
   }, [rulesList])
 
   // Map each rule ID to its total execution sequence number (#1, #2, #3...)
@@ -262,7 +263,7 @@ export default function RulesPage() {
 
   // Filtered rules based on search query, status, and category
   const filteredRules = useMemo(() => {
-    let result = fullOrderedRules
+    let result = [...fullOrderedRules]
 
     if (statusFilter === 'active') {
       result = result.filter(r => r.is_active)
@@ -844,7 +845,6 @@ export default function RulesPage() {
               <div className="divide-y divide-border">
                 {filteredRules.map((rule, index) => {
                   const executionOrder = executionOrderMap.get(rule.id) ?? index + 1
-                  const hasStopProcessing = rule.actions?.some(a => a.op === 'stop_processing')
                   const isDragging = draggedRuleId === rule.id
                   const isOverTop = dragOverTarget?.id === rule.id && dragOverTarget.pos === 'before'
                   const isOverBottom = dragOverTarget?.id === rule.id && dragOverTarget.pos === 'after'
@@ -940,13 +940,6 @@ export default function RulesPage() {
                             ) : (
                               <span className="text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 px-1.5 py-0.2 rounded-full">
                                 {t('rules.filterActive', 'active')}
-                              </span>
-                            )}
-
-                            {hasStopProcessing && (
-                              <span className="text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 px-1.5 py-0.2 rounded-full flex items-center gap-1">
-                                <ShieldAlert size={11} />
-                                {t('rules.stopProcessingBadge', 'Stops further rules')}
                               </span>
                             )}
                           </div>

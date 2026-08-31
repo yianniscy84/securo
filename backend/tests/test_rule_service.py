@@ -239,51 +239,6 @@ async def test_reorder_rules(session: AsyncSession, test_user, test_workspace, t
     assert reordered[2].priority == 20
 
 
-@pytest.mark.asyncio
-async def test_stop_processing_action(session: AsyncSession, test_user, test_workspace, test_account, test_categories):
-    # Rule 1 matches and sets category + stop_processing
-    await create_rule(
-        session, test_workspace.id, test_user.id,
-        RuleCreate(
-            name="Specific Rule with Stop",
-            conditions=[RuleCondition(field="description", op="contains", value="SPECIAL")],
-            actions=[
-                RuleAction(op="set_category", value=str(test_categories[0].id)),
-                RuleAction(op="stop_processing"),
-            ],
-            priority=10,
-        ),
-    )
-    # Rule 2 matches as well, but would append notes
-    await create_rule(
-        session, test_workspace.id, test_user.id,
-        RuleCreate(
-            name="Generic Rule",
-            conditions=[RuleCondition(field="description", op="contains", value="SPECIAL")],
-            actions=[RuleAction(op="append_notes", value="TAG_SHOULD_NOT_BE_ADDED")],
-            priority=20,
-        ),
-    )
-
-    tx = Transaction(
-        user_id=test_user.id,
-        workspace_id=test_workspace.id,
-        account_id=test_account.id,
-        amount=Decimal("-10.00"),
-        date=date(2026, 1, 1),
-        description="SPECIAL STORE",
-        currency="BRL",
-        type="debit",
-        source="manual",
-    )
-    session.add(tx)
-    await session.commit()
-
-    await apply_rules_to_transaction(session, test_user.id, tx)
-    assert tx.category_id == test_categories[0].id
-    # Notes from Rule 2 should NOT have been applied because Rule 1 stopped processing
-    assert tx.notes is None or "TAG_SHOULD_NOT_BE_ADDED" not in tx.notes
-
 
 # ---------------------------------------------------------------------------
 # DuplicateRuleError

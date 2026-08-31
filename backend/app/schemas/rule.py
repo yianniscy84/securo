@@ -60,7 +60,7 @@ RuleConditionNode = Union[RuleConditionGroup, RuleCondition]
 
 
 class RuleAction(BaseModel):
-    op: str      # set_category, set_payee, set_description, append_notes, ignore, stop_processing
+    op: str      # set_category, set_payee, set_description, append_notes, ignore
     value: Optional[Any] = None   # entity UUID, text, or None depending on action
 
 
