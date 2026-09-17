@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     enable_banking_private_key_file: str = ""  # path to PEM file; takes precedence
     enable_banking_api_url: str = "https://api.enablebanking.com"
     enable_banking_oauth_redirect_uri: str = ""  # empty derives from FRONTEND_URL
+    enable_banking_history_days: int = 999
 
     # SimpleFIN Bridge (US/intl banks, paste-a-token flow). Off by default.
     # The bridge URL defaults to the beta/sandbox host so users can test with

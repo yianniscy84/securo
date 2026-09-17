@@ -4654,3 +4654,207 @@ async def test_ensure_group_relocates_wallet_when_connection_moves_workspaces(
     assert group.connection_id == conn.id
     assert group.workspace_id == test_workspace.id
     assert group.name == "Moved Wallet"
+
+
+@pytest.mark.asyncio
+async def test_sync_reauthorizes_rotated_account_external_id_without_duplication(
+    session: AsyncSession, test_user, test_workspace
+):
+    """Enable Banking rotates account UIDs on reauthorization.
+    When external_id changes, sync must match by masked_number/currency and update
+    in place rather than creating a duplicate Account."""
+    conn = await _make_connection(session, test_user.id, "Rabobank")
+    original_account = Account(
+        id=uuid.uuid4(),
+        user_id=test_user.id,
+        workspace_id=test_workspace.id,
+        connection_id=conn.id,
+        external_id="old-eb-uid-111",
+        name="Betaalrekening",
+        masked_number="4321",
+        type="checking",
+        balance=Decimal("100.00"),
+        currency="EUR",
+    )
+    session.add(original_account)
+    await session.commit()
+    orig_id = original_account.id
+
+    mock_provider = AsyncMock()
+    mock_provider.refresh_credentials = AsyncMock(return_value={"session_id": "s2"})
+    mock_provider.get_accounts = AsyncMock(return_value=[
+        AccountData(
+            external_id="new-eb-uid-222",  # Rotated UID
+            name="Betaalrekening",
+            type="checking",
+            balance=Decimal("150.00"),
+            currency="EUR",
+            masked_number="4321",
+        )
+    ])
+    mock_provider.get_transactions = AsyncMock(return_value=[])
+
+    with patch("app.services.connection_service.get_provider", return_value=mock_provider), \
+         patch("app.services.connection_service.detect_transfer_pairs", new_callable=AsyncMock), \
+         patch("app.services.connection_service.stamp_primary_amount", new_callable=AsyncMock), \
+         patch("app.services.connection_service.apply_rules_to_transaction", new_callable=AsyncMock):
+        await sync_connection(session, conn.id, test_workspace.id, test_user.id)
+
+    accounts = (
+        await session.execute(
+            select(Account).where(Account.connection_id == conn.id)
+        )
+    ).scalars().all()
+    assert len(accounts) == 1, "Must not create a duplicate account on rotated UID"
+    assert accounts[0].id == orig_id, "Must keep the original account's UUID"
+    assert accounts[0].external_id == "new-eb-uid-222", "Must update external_id to new UID"
+    assert accounts[0].balance == Decimal("150.00")
+
+
+@pytest.mark.asyncio
+async def test_handle_oauth_callback_adopts_existing_disconnected_connection(
+    session: AsyncSession, test_user, test_workspace
+):
+    """When reconnecting via '+ Connect Bank' (without reconnect_connection_id),
+    an existing disconnected/expired connection for that bank must be adopted
+    rather than creating a duplicate BankConnection row."""
+    existing_conn = await _make_connection(session, test_user.id, "Rabobank")
+    existing_conn.provider = "enable_banking"
+    existing_conn.status = "expired"
+    existing_conn_id = existing_conn.id
+    await session.commit()
+
+    mock_provider = AsyncMock()
+    mock_provider.handle_oauth_callback = AsyncMock(return_value=ConnectionData(
+        external_id="sess-new-123",
+        institution_name="Rabobank",
+        credentials={"session_id_enc": "enc-123"},
+        accounts=[],
+    ))
+
+    with patch("app.services.connection_service.get_provider", return_value=mock_provider):
+        result = await handle_oauth_callback(
+            session,
+            test_workspace.id,
+            test_user.id,
+            "oauth-code-xyz",
+            provider_name="enable_banking",
+            reconnect_connection_id=None,  # No explicit reconnect ID
+        )
+
+    assert result.id == existing_conn_id, "Must adopt existing connection row"
+    assert result.status == "active"
+    assert result.external_id == "sess-new-123"
+
+    all_conns = (
+        await session.execute(
+            select(BankConnection).where(
+                BankConnection.workspace_id == test_workspace.id,
+                BankConnection.institution_name == "Rabobank",
+            )
+        )
+    ).scalars().all()
+    assert len(all_conns) == 1, "Must not duplicate BankConnection row"
+
+
+@pytest.mark.asyncio
+async def test_cleanup_duplicate_connected_accounts_preserves_original_uuid(
+    session: AsyncSession, test_user, test_workspace
+):
+    """Cleanup must consolidate duplicate accounts onto the original account,
+    keeping the original UUID and moving unique transactions without duplicate inserts."""
+    conn = await _make_connection(session, test_user.id, "Bunq")
+    
+    # Original account created first with older transaction
+    orig_acc = Account(
+        id=uuid.uuid4(),
+        user_id=test_user.id,
+        workspace_id=test_workspace.id,
+        connection_id=conn.id,
+        external_id="bunq-uid-1",
+        name="Main Account",
+        display_name="My Primary Bunq",
+        masked_number="9876",
+        type="checking",
+        balance=Decimal("200.00"),
+        currency="EUR",
+    )
+    dup_acc = Account(
+        id=uuid.uuid4(),
+        user_id=test_user.id,
+        workspace_id=test_workspace.id,
+        connection_id=conn.id,
+        external_id="bunq-uid-2",
+        name="Main Account",
+        masked_number="9876",
+        type="checking",
+        balance=Decimal("250.00"),
+        currency="EUR",
+    )
+    session.add_all([orig_acc, dup_acc])
+    await session.commit()
+    orig_id = orig_acc.id
+    dup_id = dup_acc.id
+
+    # Shared transaction in both accounts
+    tx_shared_orig = Transaction(
+        id=uuid.uuid4(),
+        account_id=orig_id,
+        user_id=test_user.id,
+        workspace_id=test_workspace.id,
+        external_id="tx-shared",
+        description="Coffee",
+        amount=Decimal("3.50"),
+        date=date(2026, 5, 1),
+        type="debit",
+        source="sync",
+    )
+    tx_shared_dup = Transaction(
+        id=uuid.uuid4(),
+        account_id=dup_id,
+        user_id=test_user.id,
+        workspace_id=test_workspace.id,
+        external_id="tx-shared",
+        description="Coffee",
+        amount=Decimal("3.50"),
+        date=date(2026, 5, 1),
+        type="debit",
+        source="sync",
+    )
+    # Unique transaction only in the duplicate account
+    tx_unique_dup = Transaction(
+        id=uuid.uuid4(),
+        account_id=dup_id,
+        user_id=test_user.id,
+        workspace_id=test_workspace.id,
+        external_id="tx-unique-new",
+        description="Lunch",
+        amount=Decimal("15.00"),
+        date=date(2026, 5, 2),
+        type="debit",
+        source="sync",
+    )
+    session.add_all([tx_shared_orig, tx_shared_dup, tx_unique_dup])
+    await session.commit()
+
+    from app.services.connection_service import _cleanup_duplicate_connected_accounts
+    await _cleanup_duplicate_connected_accounts(session, conn.id)
+    await session.commit()
+
+    remaining_accounts = (
+        await session.execute(
+            select(Account).where(Account.connection_id == conn.id)
+        )
+    ).scalars().all()
+    assert len(remaining_accounts) == 1
+    assert remaining_accounts[0].id == orig_id, "Must preserve original account UUID"
+    assert remaining_accounts[0].display_name == "My Primary Bunq"
+
+    # Verify transactions are merged without duplicate copies
+    remaining_txs = (
+        await session.execute(
+            select(Transaction).where(Transaction.account_id == orig_id).order_by(Transaction.date)
+        )
+    ).scalars().all()
+    assert len(remaining_txs) == 2
+    assert {t.external_id for t in remaining_txs} == {"tx-shared", "tx-unique-new"}

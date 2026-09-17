@@ -1052,6 +1052,26 @@ async def handle_oauth_callback(
     provider = get_provider(provider_name)
     connection_data = await provider.handle_oauth_callback(code)
 
+    if not existing_reconnect and connection_data.institution_name:
+        # Detect reconnect from disconnected state (user clicked Connect Bank rather than Reconnect button)
+        existing_candidate = (
+            await session.execute(
+                select(BankConnection)
+                .where(
+                    BankConnection.workspace_id == workspace_id,
+                    BankConnection.provider == provider_name,
+                    func.lower(BankConnection.institution_name)
+                    == func.lower(connection_data.institution_name),
+                )
+                .order_by(
+                    BankConnection.status != "active",
+                    BankConnection.created_at.desc(),
+                )
+            )
+        ).scalars().first()
+        if existing_candidate:
+            existing_reconnect = existing_candidate
+
     if existing_reconnect:
         existing_reconnect.external_id = connection_data.external_id
         existing_reconnect.institution_name = (
@@ -1678,6 +1698,126 @@ async def _sync_credit_card_bills(
     return by_external_id
 
 
+async def _pick_original_account(
+    session: AsyncSession, accounts: list[Account]
+) -> Account:
+    """Pick the original Securo account among duplicates so its UUID is preserved.
+
+    Prioritizes:
+    1. Account with a user-assigned display_name.
+    2. Account with the earliest ingested transaction (Transaction.created_at).
+    3. Account with the highest transaction count.
+    4. Deterministic fallback.
+    """
+    if len(accounts) == 1:
+        return accounts[0]
+
+    best_account = accounts[0]
+    best_score = None
+
+    for acc in accounts:
+        has_display = 1 if acc.display_name else 0
+        tx_stats = (
+            await session.execute(
+                select(
+                    func.min(Transaction.created_at),
+                    func.count(Transaction.id),
+                ).where(Transaction.account_id == acc.id)
+            )
+        ).first()
+
+        min_created = tx_stats[0] if tx_stats else None
+        tx_count = tx_stats[1] if tx_stats else 0
+        ts_val = min_created.timestamp() if min_created else float("inf")
+        score = (has_display, -ts_val, tx_count)
+
+        if best_score is None or score > best_score:
+            best_score = score
+            best_account = acc
+
+    return best_account
+
+
+async def _cleanup_duplicate_connected_accounts(
+    session: AsyncSession, connection_id: uuid.UUID
+) -> None:
+    """Consolidate duplicate accounts under a connection caused by reauthorization.
+
+    When a provider rotates account external_ids on reauth without fallback
+    matching, duplicate Account rows were created sharing the same masked_number
+    and currency. This merges them onto the oldest original account and cleans up the duplicates.
+    """
+    accounts = (
+        await session.execute(
+            select(Account)
+            .where(Account.connection_id == connection_id)
+            .order_by(Account.id)
+        )
+    ).scalars().all()
+    if len(accounts) <= 1:
+        return
+
+    # Group by (masked_number, currency)
+    by_key: dict[tuple[str, str], list[Account]] = {}
+    for acc in accounts:
+        if acc.masked_number:
+            key = (acc.masked_number, acc.currency)
+            by_key.setdefault(key, []).append(acc)
+
+    for (mask, curr), dup_list in by_key.items():
+        if len(dup_list) <= 1:
+            continue
+        primary = await _pick_original_account(session, dup_list)
+        for dup in dup_list:
+            if dup.id == primary.id:
+                continue
+            primary_txs = (
+                await session.execute(
+                    select(Transaction).where(Transaction.account_id == primary.id)
+                )
+            ).scalars().all()
+            primary_ext_ids = {t.external_id for t in primary_txs if t.external_id}
+            primary_fps = {
+                (
+                    t.date,
+                    t.amount,
+                    t.type,
+                    (t.original_description or t.description or "").strip().lower(),
+                )
+                for t in primary_txs
+            }
+
+            dup_txs = (
+                await session.execute(
+                    select(Transaction).where(Transaction.account_id == dup.id)
+                )
+            ).scalars().all()
+
+            for tx in dup_txs:
+                fp = (
+                    tx.date,
+                    tx.amount,
+                    tx.type,
+                    (tx.original_description or tx.description or "").strip().lower(),
+                )
+                if (tx.external_id and tx.external_id in primary_ext_ids) or fp in primary_fps:
+                    await session.delete(tx)
+                else:
+                    tx.account_id = primary.id
+                    if tx.external_id:
+                        primary_ext_ids.add(tx.external_id)
+                    primary_fps.add(fp)
+
+            await session.execute(
+                update(CreditCardBill)
+                .where(CreditCardBill.account_id == dup.id)
+                .values(account_id=primary.id)
+            )
+            await session.delete(dup)
+
+    await session.flush()
+
+
 async def sync_connection(
     session: AsyncSession,
     connection_id: uuid.UUID,
@@ -1759,6 +1899,9 @@ async def sync_connection(
             # On "failed" we read whatever cached copy the provider has —
             # better than aborting the entire sync over a transient hiccup.
 
+        # Clean up any legacy duplicate accounts left by earlier reauthorization passes
+        await _cleanup_duplicate_connected_accounts(session, connection.id)
+
         # Update accounts
         user = await session.get(User, user_id)
         user_currency = user.primary_currency if user else get_settings().default_currency
@@ -1774,6 +1917,43 @@ async def sync_connection(
                 )
             )
             account = result.scalar_one_or_none()
+
+            if account is None:
+                # Fallback: re-link existing account whose external_id was rotated
+                # on reauth (e.g. Enable Banking session-ephemeral UIDs)
+                if acc_data.masked_number:
+                    candidates = (
+                        await session.execute(
+                            select(Account).where(
+                                Account.connection_id == connection.id,
+                                Account.masked_number == acc_data.masked_number,
+                                Account.currency == acc_data.currency,
+                            )
+                        )
+                    ).scalars().all()
+                    if len(candidates) == 1:
+                        account = candidates[0]
+                    elif len(candidates) > 1:
+                        for c in candidates:
+                            if c.type == acc_data.type:
+                                account = c
+                                break
+                        if not account:
+                            account = candidates[0]
+                elif len(accounts_data) == 1:
+                    candidates = (
+                        await session.execute(
+                            select(Account).where(
+                                Account.connection_id == connection.id,
+                                Account.currency == acc_data.currency,
+                            )
+                        )
+                    ).scalars().all()
+                    if len(candidates) == 1:
+                        account = candidates[0]
+
+                if account is not None:
+                    account.external_id = acc_data.external_id
 
             if account is not None:
                 account.user_id = user_id

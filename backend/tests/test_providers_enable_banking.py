@@ -487,3 +487,40 @@ def test_mask_last4_returns_none_when_unusable():
 
 def test_mask_last4_handles_exactly_four():
     assert mask_last4("1234") == "1234"
+
+
+def test_txn_fingerprint_invariant_to_session_uid_rotation():
+    """Enable Banking rotates account UIDs on every reauth session.
+    Transaction fingerprints must be stable across different session UIDs
+    so identical booked transactions don't duplicate on reauthorization."""
+    raw = {
+        "transaction_amount": {"amount": "45.00", "currency": "EUR"},
+        "credit_debit_indicator": "DBIT",
+        "booking_date": "2026-06-01",
+        "value_date": "2026-06-01",
+        "remittance_information": ["Supermarket Groceries"],
+        "creditor_account": {"iban": "NL88RABO0123456789"},
+    }
+    fp_session_1 = _txn_fingerprint("ephemeral-uid-session-1", raw)
+    fp_session_2 = _txn_fingerprint("ephemeral-uid-session-2", raw)
+    assert fp_session_1 == fp_session_2
+
+
+@pytest.mark.asyncio
+async def test_get_transactions_passes_strategy_longest_and_configured_history(eb_keys):
+    """When since is None, get_transactions uses strategy=longest and 999 days history."""
+    provider = EnableBankingProvider()
+    captured_params: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_params.update(dict(request.url.params))
+        return httpx.Response(200, json={"transactions": []})
+
+    credentials = {"session_id_enc": None, "session_id": "sess-test", "valid_until": "2099-01-01T00:00:00Z"}
+    with _patch_client(provider, handler):
+        await provider.get_transactions(credentials, "acc-uid-1", since=None)
+
+    assert captured_params.get("strategy") == "longest"
+    # Check that date_from is roughly 999 days ago (within 2 days tolerance)
+    expected_start = (date.today() - timedelta(days=999)).isoformat()
+    assert captured_params.get("date_from") == expected_start

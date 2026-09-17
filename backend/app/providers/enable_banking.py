@@ -138,12 +138,14 @@ def _txn_fingerprint(account_uid: str, raw: dict) -> str:
 
     EB's `entry_reference` is unreliable across providers, so we hash the
     fields most likely to persist across re-fetches of the same booked txn.
+    Account UIDs in Enable Banking are ephemeral per-session tokens, so we
+    deliberately exclude account_uid from the hash so transactions maintain
+    identical fingerprints across reauthorization sessions.
     Pending → booked transitions deliberately produce a different id; the
     sync layer's pending↔posted twin matcher handles that.
     """
     amount = raw.get("transaction_amount") or {}
     parts = [
-        account_uid,
         raw.get("booking_date") or "",
         raw.get("value_date") or "",
         str(amount.get("amount") or ""),
@@ -543,20 +545,32 @@ class EnableBankingProvider(BankProvider):
         payee_source: str = "auto",
     ) -> list[TransactionData]:
         _ = self._session_id(credentials)  # surface expired credentials early
-        date_from = (since or (date.today() - timedelta(days=DEFAULT_HISTORY_DAYS))).isoformat()
-        date_to = date.today().isoformat()
+        history_days = get_settings().enable_banking_history_days
+        params: dict[str, Any] = {}
+        if since:
+            date_from = since.isoformat()
+            date_to = date.today().isoformat()
+            params = {"date_from": date_from, "date_to": date_to}
+        else:
+            date_from = (date.today() - timedelta(days=history_days)).isoformat()
+            date_to = date.today().isoformat()
+            params = {
+                "date_from": date_from,
+                "date_to": date_to,
+                "strategy": "longest",
+            }
         transactions: list[TransactionData] = []
         continuation_key: Optional[str] = None
         seen_continuation_keys: set[str] = set()
         seen_transaction_ids: set[str] = set()
         for _ in range(TRANSACTION_PAGE_LIMIT):
-            params: dict[str, Any] = {"date_from": date_from, "date_to": date_to}
+            loop_params: dict[str, Any] = dict(params)
             if continuation_key:
-                params["continuation_key"] = continuation_key
+                loop_params["continuation_key"] = continuation_key
             page = await self._request(
                 "GET",
                 f"/accounts/{account_external_id}/transactions",
-                params=params,
+                params=loop_params,
             )
             for raw_txn, status in self._iter_transactions(page):
                 parsed = self._build_transaction(
